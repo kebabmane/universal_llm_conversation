@@ -46,6 +46,7 @@ from .const import (
     CONF_MAX_TOKENS,
     CONF_ORGANIZATION,
     CONF_PROMPT,
+    CONF_PROVIDER_PRESET,
     CONF_REQUEST_TIMEOUT,
     CONF_SCHEMA_STRICT,
     CONF_SHORTEN_TOOL_CALL_ID,
@@ -75,8 +76,9 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     DOMAIN,
+    PROVIDER_PRESETS,
 )
-from .helpers import get_provider
+from .helpers import async_fetch_models, get_provider
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,11 +87,11 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_NAME, default="Universal LLM"): str,
         vol.Required(CONF_API_KEY): str,
-        vol.Optional("provider", default="openai_compatible"): SelectSelector(
+        vol.Required(CONF_PROVIDER_PRESET, default="fireworks"): SelectSelector(
             SelectSelectorConfig(
                 options=[
-                    SelectOptionDict(value=p["key"], label=p["label"])
-                    for p in API_PROVIDERS
+                    SelectOptionDict(value=k, label=v["label"])
+                    for k, v in PROVIDER_PRESETS.items()
                 ],
                 mode=SelectSelectorMode.DROPDOWN,
             )
@@ -126,10 +128,22 @@ DEFAULT_OPTIONS = types.MappingProxyType(
 )
 
 
+def _get_base_url_from_preset(data: dict[str, Any]) -> str | None:
+    """Resolve base URL from provider preset or manual input."""
+    preset_key = data.get(CONF_PROVIDER_PRESET, "custom")
+    preset = PROVIDER_PRESETS.get(preset_key, {})
+    preset_base = preset.get("base_url", "")
+    manual_base = data.get(CONF_BASE_URL, "")
+    # Use manual override if provided, otherwise use preset default
+    if manual_base:
+        return manual_base if manual_base != preset_base else preset_base
+    return preset_base or None
+
+
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     """Validate user input allows us to connect."""
     api_key = data[CONF_API_KEY]
-    base_url = data.get(CONF_BASE_URL)
+    base_url = _get_base_url_from_preset(data)
     api_version = data.get(CONF_API_VERSION)
     organization = data.get(CONF_ORGANIZATION)
     skip_auth = data.get(CONF_SKIP_AUTHENTICATION, False)
@@ -174,13 +188,41 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.exception("Validation error")
             errors["base"] = "cannot_connect"
         else:
+            # Store provider details in context and proceed to model selection
+            self.context["user_input"] = user_input
+            return await self.async_step_model()
+
+        return self.async_show_form(
+            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_model(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle model selection step."""
+        user_data: dict[str, Any] = self.context.get("user_input", {})
+        preset_key = user_data.get(CONF_PROVIDER_PRESET, "custom")
+        preset = PROVIDER_PRESETS.get(preset_key, {})
+        base_url = _get_base_url_from_preset(user_data)
+        api_key = user_data.get(CONF_API_KEY, "")
+        supports_model_list = preset.get("supports_model_list", False)
+
+        if user_input is not None:
+            # Merge model selection into user data
+            chat_model = user_input.get(CONF_CHAT_MODEL, DEFAULT_CHAT_MODEL)
+            fallback_model = user_input.get(CONF_FALLBACK_MODEL, "")
+            # Update the subentry defaults with selected model
+            options = dict(DEFAULT_OPTIONS)
+            options[CONF_CHAT_MODEL] = chat_model
+            options[CONF_FALLBACK_MODEL] = fallback_model
+
             return self.async_create_entry(
-                title=user_input.get(CONF_NAME, DEFAULT_NAME),
-                data=user_input,
+                title=user_data.get(CONF_NAME, DEFAULT_NAME),
+                data=user_data,
                 subentries=[
                     {
                         "subentry_type": "conversation",
-                        "data": dict(DEFAULT_OPTIONS),
+                        "data": options,
                         "title": DEFAULT_CONVERSATION_NAME,
                         "unique_id": None,
                     },
@@ -193,8 +235,49 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 ],
             )
 
+        # Build schema based on whether we can fetch models
+        schema: dict[Any, Any] = {}
+        models: list[str] = []
+
+        if supports_model_list and base_url and api_key:
+            models = await async_fetch_models(
+                self.hass, api_key=api_key, base_url=base_url, timeout=10.0
+            )
+
+        if models:
+            # Show dropdown with fetched models + custom option
+            schema[
+                vol.Required(CONF_CHAT_MODEL, default=models[0] if models else DEFAULT_CHAT_MODEL)
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=m, label=m)
+                        for m in models
+                    ] + [SelectOptionDict(value="__custom__", label="Enter custom model manually...")],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+        else:
+            # Show plain text input when fetch failed or not supported
+            schema[
+                vol.Required(CONF_CHAT_MODEL, default=DEFAULT_CHAT_MODEL)
+            ] = str
+
+        schema[
+            vol.Optional(CONF_FALLBACK_MODEL, default=DEFAULT_FALLBACK_MODEL)
+        ] = str
+
+        errors = {}
+        if supports_model_list and not models:
+            errors["base"] = "model_fetch_failed"
+
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="model",
+            data_schema=vol.Schema(schema),
+            errors=errors,
+            description_placeholders={
+                "provider": preset.get("label", preset_key),
+            },
         )
 
     @classmethod

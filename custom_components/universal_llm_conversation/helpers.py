@@ -13,6 +13,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.template import Template
 
+from openai import AsyncOpenAI
+
 from .providers import MODEL_CAPABILITY_OVERRIDES, OPENAI_COMPATIBLE_CAPABILITIES
 from .providers.base import BaseProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
@@ -141,3 +143,43 @@ def get_provider(
         )
     # TODO: Add anthropic and gemini native providers
     raise ValueError(f"Unknown provider: {provider_key}")
+
+
+async def async_fetch_models(
+    hass: HomeAssistant,
+    api_key: str,
+    base_url: str,
+    timeout: float = 10.0,
+) -> list[str]:
+    """Fetch available chat/completion models from an OpenAI-compatible /v1/models endpoint.
+
+    Filters out non-chat models by excluding embeddings, audio, image, and TTS model names.
+    """
+    try:
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+        )
+        from functools import partial
+
+        response = await hass.async_add_executor_job(
+            partial(client.models.list, timeout=timeout)
+        )
+        models: list[str] = []
+        excluded_keywords = [
+            "embed", "embedding", "image", "audio", "tts", "whisper", "stt",
+            "transcription", "speech", "vision-encode", "rerank", "classifier",
+        ]
+        async for model in response:
+            model_id = getattr(model, "id", "")
+            if not model_id:
+                continue
+            # Skip non-chat models
+            if any(kw in model_id.lower() for kw in excluded_keywords):
+                continue
+            models.append(model_id)
+        return sorted(models)
+    except Exception as err:
+        _LOGGER.warning("Failed to fetch models from %s: %s", base_url, err)
+        return []

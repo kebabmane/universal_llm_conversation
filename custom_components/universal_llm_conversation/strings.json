@@ -3,20 +3,29 @@
     "step": {
       "user": {
         "title": "Universal LLM Conversation",
-        "description": "Configure your LLM provider connection.",
+        "description": "Select your LLM provider and enter API credentials.",
         "data": {
           "name": "Integration Name",
           "api_key": "API Key",
-          "provider": "Provider",
-          "base_url": "Base URL (optional)",
+          "provider_preset": "Provider",
+          "base_url": "Base URL (override preset or for Custom/Azure)",
           "api_version": "API Version (optional, for Azure)",
           "organization": "Organization (optional)",
           "skip_authentication": "Skip authentication validation"
+        }
+      },
+      "model": {
+        "title": "Select Model",
+        "description": "Choose the chat/completion model for {provider}.",
+        "data": {
+          "chat_model": "Chat Model",
+          "fallback_model": "Fallback Model (optional)"
         }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the LLM provider. Check your API key and base URL.",
+      "model_fetch_failed": "Could not fetch model list. You can still enter a model name manually.",
       "unknown": "Unexpected error occurred."
     }
   },

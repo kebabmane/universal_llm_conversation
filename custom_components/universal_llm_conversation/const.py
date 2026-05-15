@@ -13,7 +13,55 @@ CONF_ORGANIZATION = "organization"
 CONF_SKIP_AUTHENTICATION = "skip_authentication"
 DEFAULT_SKIP_AUTHENTICATION = False
 
-# Provider registry keys
+# Provider presets with default base URLs and model list support
+CONF_PROVIDER_PRESET = "provider_preset"
+CONF_CHAT_MODEL = "chat_model"
+CONF_FALLBACK_MODEL = "fallback_model"
+
+PROVIDER_PRESETS = {
+    "fireworks": {
+        "label": "Fireworks AI",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "supports_model_list": True,
+    },
+    "openai": {
+        "label": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "supports_model_list": True,
+    },
+    "ollama": {
+        "label": "Ollama (Local)",
+        "base_url": "http://localhost:11434/v1",
+        "supports_model_list": True,
+    },
+    "openrouter": {
+        "label": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "supports_model_list": True,
+    },
+    "azure": {
+        "label": "Azure OpenAI",
+        "base_url": "",
+        "supports_model_list": True,
+    },
+    "anthropic": {
+        "label": "Anthropic (Native - no model list)",
+        "base_url": "https://api.anthropic.com",
+        "supports_model_list": False,
+    },
+    "gemini": {
+        "label": "Google Gemini (Native - no model list)",
+        "base_url": "https://generativelanguage.googleapis.com",
+        "supports_model_list": False,
+    },
+    "custom": {
+        "label": "Custom / Other",
+        "base_url": "",
+        "supports_model_list": True,
+    },
+}
+
+# Legacy provider registry keys (used internally)
 PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_GEMINI = "gemini"
