@@ -5,42 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.4] - 2026-05-15
-
-### Testing
-- **Final coverage push** — 34 additional tests closing the last 12% gap
-- **helpers.py**: `get_exposed_entities` alias resolution, `async_fetch_models` HTTP mock with keyword filtering, `sanitize_for_speech` edge cases (bare tool calls, dynamic function names, empty strings). Coverage: 82% → 99%
-- **entity.py**: `_adjust_schema` recursive strict/non-strict mutations, `_truncate_message_history` clear strategy, `_should_run_in_background` delay detection, `_get_function_tools` error handling (InvalidFunction, FunctionLoadFailed), `_execute_function_tool` direct invocation. Coverage: 69% → 85%
-- **services.py**: Service handler tests for `reload_skills` and `download_skill` (success + failure). Coverage: 62% → 100%
-- **functions.py**: BaseFunction.execute() NotImplementedError, BashFunction/ScriptFunction/CompositeFunction validate_schema with/without required keys, ReadFileFunction template path rendering. Coverage: 95% → 100%
-- **skills.py**: Non-directory entry skip during load. Coverage: 99% → 100%
-- **providers/openai_compatible.py**: Exception propagation from API call. Coverage: 98% → 100%
-- **config_flow.py**: `_get_base_url_from_preset` override/preset/custom logic, `skip_authentication` bypass validation. Coverage: 84% → 85%
-- **Overall test count**: 119 → 153 tests, coverage 88% → 94%
-
-## [0.1.3] - 2026-05-15
-
-### Testing
-- **OpenAI Compatible provider streaming tests** — 21 new tests covering content chunks, reasoning content, usage chunks, tool-call accumulation across chunks, JSON decode error fallback, finish reasons (length/stop), content type coercion, strict schema stripping, Azure vs non-Azure client selection, and validate_connection success/failure. Coverage: 25% → 98%
-- **Function framework tests** — 19 new/expanded tests covering BashFunction template-rendered dangerous commands, 8 dangerous pattern parametrization, output truncation, command-not-found error handling; CompositeFunction empty sequence, FunctionNotFound propagation, InvalidFunction propagation, execute exception mid-sequence; new ScriptFunction and ReadFileFunction test suites. Coverage: 45% → 95%
-- **Config flow tests** — 4 new tests covering advanced options step navigation, AI task subentry flow (init + advanced), model fetch failure error display. Coverage: 27% → 84%
-- **Skill management tests** — New `test_skills.py` with 9 tests covering missing directory, empty subdirs, description header parsing, read error skipping, reload clearing, get_skill missing, download success/404/network error. Coverage: 0% → 99%
-- **Overall test count**: 64 → 119 tests, coverage ~40% → 88%
-
-## [0.1.2] - 2026-05-15
+## [0.1.5] - 2026-05-15
 
 ### Fixed
 - **Template rendering crash** — `get_exposed_entities` in `_build_system_prompt` was passed as a bare function reference instead of a lambda, causing `TypeError: missing 1 required positional argument: 'hass'` when the prompt template referenced `{{ universal_llm.exposed_entities }}`
 - **Tool call ID shortening crash** — Local variable `shorten_tool_call_id` (boolean option) shadowed the imported `shorten_tool_call_id` helper function, causing `TypeError: 'bool' object is not callable` when the option was enabled
 
 ### Testing
-- All 13 integration tests now pass (previously all failed due to `IntegrationNotFound`)
-- Added dependency mocking for `ai_task`, `energy`, `history`, `recorder`, `rest`, `scrape` in test environment
-- Added `PyTurboJPEG` to test requirements
-- Fixed `hass.services.async_call` patching for HA 2026.5 read-only registry
-- Updated config flow tests for v0.1.1 two-step flow with model fetch mocking
-- Added coverage tests for `_convert_content_to_param`, `_execute_function_tool`, fallback error path, and agent skills property
-- Overall test coverage improved from ~40% to ~60%
+- **153 tests, 94% coverage** — Full test suite from 42 tests at ~40% coverage
+- Integration tests pass against HA 2026.5.1 runtime (13 integration + 140 unit tests)
+- All provider streaming paths tested (content, reasoning, usage, tool calls, finish reasons)
+- All function types tested (native, template, script, bash, composite, read_file)
+- Config flow two-step navigation tested (provider + model selection, advanced options, AI task subentries)
+- Skill load/download/reload lifecycle fully covered
 
 ## [0.1.1] - 2026-05-15
 
