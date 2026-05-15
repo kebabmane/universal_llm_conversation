@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +15,8 @@ from custom_components.universal_llm_conversation.functions import (
     BashFunction,
     CompositeFunction,
     ExecuteServiceFunction,
+    ReadFileFunction,
+    ScriptFunction,
     TemplateFunction,
     get_function,
 )
@@ -123,12 +126,10 @@ class TestBashFunction:
             exposed_entities=[],
         )
 
-        assert "blocked" in result.lower() or "Error" in result
+        assert "blocked" in result.lower() or "error" in result.lower()
 
     @patch("asyncio.create_subprocess_shell")
     async def test_times_out_long_command(self, mock_subprocess) -> None:
-        import asyncio
-
         hass = MagicMock()
         func = BashFunction()
 
@@ -146,7 +147,94 @@ class TestBashFunction:
             exposed_entities=[],
         )
 
-        assert "timed out" in result.lower() or "Error" in result
+        assert "timed out" in result.lower() or "error" in result.lower()
+
+
+class TestBashFunctionExtended:
+    """Extended BashFunction edge cases."""
+
+    async def test_template_rendered_then_blocked(self) -> None:
+        from homeassistant.helpers.template import Template
+
+        hass = MagicMock()
+        func = BashFunction()
+
+        with patch.object(Template, "async_render", return_value="rm -rf /"):
+            result = await func.execute(
+                hass=hass,
+                function_config={"command": "rm -rf {{ file }}"},
+                arguments={"file": "/"},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+        assert "blocked" in result.lower() or "error" in result.lower()
+
+    @pytest.mark.parametrize(
+        "bad_command",
+        [
+            "mkfs.ext4 /dev/sda1",
+            "dd if=/dev/zero of=/dev/sda",
+            "shutdown -h now",
+            "reboot",
+            "format C:",
+            "diskpart /clean",
+            "del /f /q C:\\\\*",
+            "rmdir /s /q C:\\\\Windows",
+            ":( ){ :|: };:",
+        ],
+    )
+    async def test_dangerous_patterns_blocked(self, bad_command: str) -> None:
+        hass = MagicMock()
+        func = BashFunction()
+
+        result = await func.execute(
+            hass=hass,
+            function_config={"command": bad_command},
+            arguments={},
+            llm_context=None,
+            exposed_entities=[],
+        )
+
+        assert "blocked" in result.lower() or "error" in result.lower()
+
+    @patch("asyncio.create_subprocess_shell")
+    async def test_output_truncation(self, mock_subprocess) -> None:
+        hass = MagicMock()
+        func = BashFunction()
+
+        mock_proc = MagicMock()
+        huge_output = "x" * 20_000
+        mock_proc.communicate = AsyncMock(return_value=(huge_output.encode(), b""))
+        mock_subprocess.return_value = mock_proc
+
+        result = await func.execute(
+            hass=hass,
+            function_config={"command": "cat bigfile"},
+            arguments={},
+            llm_context=None,
+            exposed_entities=[],
+        )
+
+        assert len(result) <= 10_000
+
+    @patch("asyncio.create_subprocess_shell")
+    async def test_command_not_found_error(self, mock_subprocess) -> None:
+        hass = MagicMock()
+        func = BashFunction()
+
+        mock_subprocess.side_effect = OSError("Command not found")
+
+        result = await func.execute(
+            hass=hass,
+            function_config={"command": "nonexistent_command_12345"},
+            arguments={},
+            llm_context=None,
+            exposed_entities=[],
+        )
+
+        assert "Error" in result
+        assert "not found" in result.lower() or "Command not found" in result
 
 
 class TestCompositeFunction:
@@ -174,5 +262,151 @@ class TestCompositeFunction:
 
     def test_validate_schema_requires_sequence(self) -> None:
         func = CompositeFunction()
+        with pytest.raises(InvalidFunction):
+            func.validate_schema({})
+
+    async def test_empty_sequence_returns_none(self) -> None:
+        hass = MagicMock()
+        func = CompositeFunction()
+        result = await func.execute(
+            hass=hass,
+            function_config={"sequence": []},
+            arguments={},
+            llm_context=None,
+            exposed_entities=[],
+        )
+        assert result is None
+
+    async def test_function_not_found_in_sequence(self) -> None:
+        hass = MagicMock()
+        func = CompositeFunction()
+        with pytest.raises(FunctionNotFound):
+            await func.execute(
+                hass=hass,
+                function_config={"sequence": [{"type": "nonexistent"}]},
+                arguments={},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+    async def test_invalid_step_schema_propagates(self) -> None:
+        hass = MagicMock()
+        func = CompositeFunction()
+        with pytest.raises(InvalidFunction):
+            await func.execute(
+                hass=hass,
+                function_config={"sequence": [{"type": "template"}]},
+                arguments={},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+    async def test_execute_exception_mid_sequence(self) -> None:
+        hass = MagicMock()
+        func = CompositeFunction()
+        with patch(
+            "custom_components.universal_llm_conversation.functions.TemplateFunction.execute",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                await func.execute(
+                    hass=hass,
+                    function_config={
+                        "sequence": [
+                            {"type": "template", "value_template": "Step 1"},
+                            {"type": "template", "value_template": "Step 2"},
+                        ]
+                    },
+                    arguments={},
+                    llm_context=None,
+                    exposed_entities=[],
+                )
+
+
+class TestScriptFunction:
+    """Test ScriptFunction execution."""
+
+    async def test_executes_script_sequence(self) -> None:
+        from homeassistant.helpers.script import Script
+
+        hass = MagicMock()
+        func = ScriptFunction()
+
+        with patch.object(Script, "async_run", new_callable=AsyncMock) as mock_run:
+            result = await func.execute(
+                hass=hass,
+                function_config={"sequence": [{"service": "light.turn_on", "target": {"entity_id": "light.test"}}]},
+                arguments={},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+        assert result == "Executed"
+        mock_run.assert_called_once()
+
+    def test_validate_schema_requires_sequence(self) -> None:
+        func = ScriptFunction()
+        with pytest.raises(InvalidFunction):
+            func.validate_schema({})
+
+
+class TestReadFileFunction:
+    """Test ReadFileFunction execution."""
+
+    async def test_reads_existing_file(self) -> None:
+        from pathlib import Path
+
+        hass = MagicMock()
+        func = ReadFileFunction()
+
+        with patch.object(Path, "is_file", return_value=True), \
+             patch.object(Path, "read_text", return_value="file contents"):
+            result = await func.execute(
+                hass=hass,
+                function_config={"path": "/tmp/test.txt"},
+                arguments={},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+        assert result == "file contents"
+
+    async def test_file_not_found(self) -> None:
+        from pathlib import Path
+
+        hass = MagicMock()
+        func = ReadFileFunction()
+
+        with patch.object(Path, "is_file", return_value=False):
+            result = await func.execute(
+                hass=hass,
+                function_config={"path": "/tmp/nonexistent.txt"},
+                arguments={},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+        assert "not found" in result.lower()
+
+    async def test_read_error(self) -> None:
+        from pathlib import Path
+
+        hass = MagicMock()
+        func = ReadFileFunction()
+
+        with patch.object(Path, "is_file", return_value=True), \
+             patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            result = await func.execute(
+                hass=hass,
+                function_config={"path": "/root/secret.txt"},
+                arguments={},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+        assert "Error" in result
+
+    def test_validate_schema_requires_path(self) -> None:
+        func = ReadFileFunction()
         with pytest.raises(InvalidFunction):
             func.validate_schema({})

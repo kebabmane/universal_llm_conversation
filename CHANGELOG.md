@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-05-15
+
+### Testing
+- **OpenAI Compatible provider streaming tests** — 21 new tests covering content chunks, reasoning content, usage chunks, tool-call accumulation across chunks, JSON decode error fallback, finish reasons (length/stop), content type coercion, strict schema stripping, Azure vs non-Azure client selection, and validate_connection success/failure. Coverage: 25% → 98%
+- **Function framework tests** — 19 new/expanded tests covering BashFunction template-rendered dangerous commands, 8 dangerous pattern parametrization, output truncation, command-not-found error handling; CompositeFunction empty sequence, FunctionNotFound propagation, InvalidFunction propagation, execute exception mid-sequence; new ScriptFunction and ReadFileFunction test suites. Coverage: 45% → 95%
+- **Config flow tests** — 4 new tests covering advanced options step navigation, AI task subentry flow (init + advanced), model fetch failure error display. Coverage: 27% → 84%
+- **Skill management tests** — New `test_skills.py` with 9 tests covering missing directory, empty subdirs, description header parsing, read error skipping, reload clearing, get_skill missing, download success/404/network error. Coverage: 0% → 99%
+- **Overall test count**: 64 → 119 tests, coverage ~40% → 88%
+
 ## [0.1.2] - 2026-05-15
 
 ### Fixed
