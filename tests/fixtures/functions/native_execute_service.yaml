@@ -1,0 +1,22 @@
+- spec:
+    name: execute_services
+    description: Execute service in Home Assistant.
+    parameters:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            type: object
+            properties:
+              domain:
+                type: string
+              service:
+                type: string
+              service_data:
+                type: object
+            required: ["domain", "service", "service_data"]
+      required: ["list"]
+  function:
+    type: native
+    name: execute_service

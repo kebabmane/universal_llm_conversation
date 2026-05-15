@@ -1,0 +1,12 @@
+- spec:
+    name: get_weather
+    description: Get the current weather.
+    parameters:
+      type: object
+      properties:
+        location:
+          type: string
+      required: ["location"]
+  function:
+    type: template
+    value_template: "The weather in {{ location }} is sunny"

@@ -1,0 +1,21 @@
+- spec:
+    name: run_sequence
+    description: Run a sequence of actions.
+    parameters:
+      type: object
+      properties:
+        delay:
+          type: object
+          properties:
+            seconds:
+              type: integer
+      required: ["delay"]
+  function:
+    type: composite
+    sequence:
+      - type: script
+        sequence:
+          - delay:
+              seconds: "{{ delay.seconds }}"
+      - type: template
+        value_template: "Done"

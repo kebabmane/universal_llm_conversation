@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skills system** — Download and enable reusable AI capabilities from the repository
 - **HACS compatible** — Can be installed via Home Assistant Community Store
 
+### Testing
+- 42 tests covering core logic: helpers (sanitization, capabilities), providers (parameter filtering, model overrides), functions (execute, template, bash, composite), config flow, and init logic
+- Pure unit tests run without a full Home Assistant instance
+- Full HA integration tests require the Home Assistant devcontainer or a running HA instance
+
 ### Known Limitations
 - Native Anthropic (Claude) and Google Gemini providers are not yet implemented; use the OpenAI Compatible provider with their proxy endpoints (e.g., LiteLLM, OpenRouter) as a workaround
 - `ai_task_data` subentry type is defined but not fully wired into the AI Task platform yet
