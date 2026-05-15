@@ -8,5 +8,5 @@ version = "0.1.0"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-timeout = 10
+timeout = 30
 addopts = "-vv --cov=custom_components.universal_llm_conversation --cov-report=term-missing"

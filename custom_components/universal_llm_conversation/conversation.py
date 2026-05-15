@@ -222,7 +222,7 @@ class UniversalLLMAgentEntity(
                     "working_directory": lambda: str(
                         Path(self.hass.config.config_dir) / DEFAULT_WORKING_DIRECTORY
                     ),
-                    "exposed_entities": get_exposed_entities,
+                    "exposed_entities": lambda: get_exposed_entities(self.hass),
                     "skill_dir": lambda name: str(
                         Path(self.hass.config.config_dir)
                         / DEFAULT_WORKING_DIRECTORY

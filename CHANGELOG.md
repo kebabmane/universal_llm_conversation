@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-05-15
+
+### Fixed
+- **Template rendering crash** — `get_exposed_entities` in `_build_system_prompt` was passed as a bare function reference instead of a lambda, causing `TypeError: missing 1 required positional argument: 'hass'` when the prompt template referenced `{{ universal_llm.exposed_entities }}`
+- **Tool call ID shortening crash** — Local variable `shorten_tool_call_id` (boolean option) shadowed the imported `shorten_tool_call_id` helper function, causing `TypeError: 'bool' object is not callable` when the option was enabled
+
+### Testing
+- All 13 integration tests now pass (previously all failed due to `IntegrationNotFound`)
+- Added dependency mocking for `ai_task`, `energy`, `history`, `recorder`, `rest`, `scrape` in test environment
+- Added `PyTurboJPEG` to test requirements
+- Fixed `hass.services.async_call` patching for HA 2026.5 read-only registry
+- Updated config flow tests for v0.1.1 two-step flow with model fetch mocking
+- Added coverage tests for `_convert_content_to_param`, `_execute_function_tool`, fallback error path, and agent skills property
+- Overall test coverage improved from ~40% to ~60%
+
 ## [0.1.1] - 2026-05-15
 
 ### Added

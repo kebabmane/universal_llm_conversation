@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import voluptuous as vol
 from voluptuous_openapi import convert
@@ -95,7 +95,7 @@ def _format_structured_output(schema: vol.Schema, llm_api: llm.APIInstance | Non
 
 def _convert_content_to_param(
     chat_content: list[conversation.Content],
-    shorten_tool_call_id: bool = False,
+    shorten_tool_call_id: "Callable[[str], str] | None" = None,
 ) -> list[dict[str, Any]]:
     """Convert chat log content to provider message format."""
     messages: list[dict[str, Any]] = []
@@ -192,7 +192,7 @@ class UniversalLLMBaseEntity(Entity):
             CONF_MAX_FUNCTION_CALLS_PER_CONVERSATION,
             DEFAULT_MAX_FUNCTION_CALLS_PER_CONVERSATION,
         )
-        shorten_tool_call_id = options.get(
+        do_shorten_tool_call_id = options.get(
             CONF_SHORTEN_TOOL_CALL_ID,
             DEFAULT_SHORTEN_TOOL_CALL_ID,
         )
@@ -200,7 +200,10 @@ class UniversalLLMBaseEntity(Entity):
         strict_schemas = options.get(CONF_SCHEMA_STRICT, DEFAULT_SCHEMA_STRICT)
 
         # Build messages
-        messages = _convert_content_to_param(chat_log.content, shorten_tool_call_id)
+        messages = _convert_content_to_param(
+            chat_log.content,
+            shorten_tool_call_id if do_shorten_tool_call_id else None,
+        )
 
         # Build tools
         tools: list[dict[str, Any]] = []
@@ -266,7 +269,10 @@ class UniversalLLMBaseEntity(Entity):
                 )
                 chat_log.async_add_assistant_content_without_tools(tool_result)
 
-            messages = _convert_content_to_param(chat_log.content, shorten_tool_call_id)
+            messages = _convert_content_to_param(
+                chat_log.content,
+                shorten_tool_call_id if do_shorten_tool_call_id else None,
+            )
 
             if not chat_log.unresponded_tool_results:
                 break

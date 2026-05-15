@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,38 +15,33 @@ from custom_components.universal_llm_conversation.const import DOMAIN
 
 @pytest.mark.usefixtures("mock_validate_connection")
 async def test_form(hass: HomeAssistant) -> None:
-    """Test successful config flow."""
+    """Test successful two-step config flow."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {}
+    assert result["step_id"] == "user"
 
-    with patch(
-        "custom_components.universal_llm_conversation.async_setup_entry",
-        return_value=True,
-    ) as mock_setup_entry:
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                "name": "Test LLM",
-                "api_key": "test-key",
-                "provider": "openai_compatible",
-                "base_url": "http://localhost:1234/v1",
-                "skip_authentication": False,
-            },
-        )
-        await hass.async_block_till_done()
+    # Step 1: provider credentials
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Test LLM",
+            "api_key": "test-key",
+            "provider_preset": "custom",
+            "base_url": "http://localhost:1234/v1",
+            "skip_authentication": False,
+        },
+    )
+    await hass.async_block_till_done()
 
-    assert result2["type"] is FlowResultType.CREATE_ENTRY
-    assert result2["title"] == "Test LLM"
-    assert result2["data"]["api_key"] == "test-key"
-    assert result2["data"]["provider"] == "openai_compatible"
-    mock_setup_entry.assert_called_once()
+    # Should transition to model step
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "model"
 
 
 async def test_form_cannot_connect(hass: HomeAssistant) -> None:
-    """Test config flow with connection failure."""
+    """Test config flow with connection failure on step 1."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -62,7 +57,7 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
             {
                 "name": "Test LLM",
                 "api_key": "bad-key",
-                "provider": "openai_compatible",
+                "provider_preset": "custom",
                 "base_url": "http://bad-url",
                 "skip_authentication": False,
             },
@@ -70,6 +65,36 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
 
     assert result2["type"] is FlowResultType.FORM
     assert result2["errors"] == {"base": "cannot_connect"}
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_form_with_model_fetch(hass: HomeAssistant) -> None:
+    """Test config flow when provider supports model enumeration."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    with patch(
+        "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
+        return_value=["accounts/fireworks/models/kimi-k2.6", "accounts/fireworks/models/llama-v3p1-70b"],
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "name": "Firepass LLM",
+                "api_key": "fp-test-key",
+                "provider_preset": "fireworks",
+                "skip_authentication": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "model"
+    # No model_fetch_failed error when fetch succeeds
+    assert result2.get("errors") is None or result2.get("errors") == {}
 
 
 @pytest.mark.usefixtures("mock_validate_connection")

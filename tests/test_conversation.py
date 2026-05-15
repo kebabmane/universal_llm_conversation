@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from homeassistant.components import conversation
@@ -20,10 +22,9 @@ async def test_conversation_agent_setup(
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    # Get the first subentry id as agent id
-    subentry_id = next(iter(mock_config_entry.subentries.keys()))
-    agent = conversation.async_get_agent_manager(hass).async_get_agent(
-        f"{mock_config_entry.entry_id}.{subentry_id}"
+    # Agent is registered under the config entry id
+    agent = conversation.get_agent_manager(hass).async_get_agent(
+        mock_config_entry.entry_id
     )
     assert agent is not None
     assert agent.supported_languages == "*"
@@ -38,13 +39,12 @@ async def test_converse_returns_response(
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    subentry_id = next(iter(mock_config_entry.subentries.keys()))
     result = await conversation.async_converse(
         hass,
         "hello",
         None,
         Context(),
-        agent_id=f"{mock_config_entry.entry_id}.{subentry_id}",
+        agent_id=mock_config_entry.entry_id,
     )
 
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
@@ -60,25 +60,22 @@ async def test_converse_executes_tool_call(
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    subentry_id = next(iter(mock_config_entry.subentries.keys()))
-
-    # Track service calls
+    # Track service calls via class-level patch
     service_calls = []
     original_call = hass.services.async_call
 
-    async def tracking_call(domain, service, service_data, **kwargs):
+    async def tracking_call(self, domain, service, service_data, **kwargs):
         service_calls.append((domain, service, service_data))
         return await original_call(domain, service, service_data, **kwargs)
 
-    hass.services.async_call = tracking_call
-
-    result = await conversation.async_converse(
-        hass,
-        "turn on the light",
-        None,
-        Context(),
-        agent_id=f"{mock_config_entry.entry_id}.{subentry_id}",
-    )
+    with patch("homeassistant.core.ServiceRegistry.async_call", tracking_call):
+        result = await conversation.async_converse(
+            hass,
+            "turn on the light",
+            None,
+            Context(),
+            agent_id=mock_config_entry.entry_id,
+        )
 
     # Verify service was called
     assert any(
@@ -104,14 +101,56 @@ async def test_fallback_model_retry(
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    subentry_id = next(iter(mock_config_entry.subentries.keys()))
     result = await conversation.async_converse(
         hass,
         "hello",
         None,
         Context(),
-        agent_id=f"{mock_config_entry.entry_id}.{subentry_id}",
+        agent_id=mock_config_entry.entry_id,
     )
 
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
     assert "Fallback response" in result.response.speech["plain"]["speech"]
+
+
+@pytest.mark.usefixtures("mock_validate_connection", "mock_provider_stream_always_fail")
+async def test_both_models_fail_returns_error(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test error response when primary and fallback both fail."""
+    subentry = next(iter(mock_config_entry.subentries.values()))
+    hass.config_entries.async_update_subentry(
+        mock_config_entry,
+        subentry,
+        data={**subentry.data, "fallback_model": "gpt-4o-mini"},
+    )
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await conversation.async_converse(
+        hass,
+        "hello",
+        None,
+        Context(),
+        agent_id=mock_config_entry.entry_id,
+    )
+
+    assert result.response.response_type == intent.IntentResponseType.ERROR
+    assert "problem talking to the LLM" in result.response.speech["plain"]["speech"]
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_agent_skills_empty_by_default(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test agent skills property returns empty list by default."""
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    agent = conversation.get_agent_manager(hass).async_get_agent(
+        mock_config_entry.entry_id
+    )
+    assert agent.skills == []
