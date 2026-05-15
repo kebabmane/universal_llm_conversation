@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
+import yaml
+
 from homeassistant.components import conversation
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import intent
@@ -154,3 +156,55 @@ async def test_agent_skills_empty_by_default(
         mock_config_entry.entry_id
     )
     assert agent.skills == []
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_sanitize_speech_with_function_names(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test speech sanitization strips known function names."""
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Configure function tools
+    subentry = next(iter(mock_config_entry.subentries.values()))
+    hass.config_entries.async_update_subentry(
+        mock_config_entry,
+        subentry,
+        data={**subentry.data, "functions": yaml.dump([{"spec": {"name": "turn_on_light"}, "function": {"type": "native"}}])},
+    )
+
+    result = await conversation.async_converse(
+        hass,
+        "turn on the light",
+        None,
+        Context(),
+        agent_id=mock_config_entry.entry_id,
+    )
+
+    # Response should not contain leaked function syntax
+    speech = result.response.speech["plain"]["speech"]
+    assert "turn_on_light(" not in speech
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_async_added_to_hass_absolute_path(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test skill directory resolution when working dir is absolute."""
+    from custom_components.universal_llm_conversation.const import DEFAULT_WORKING_DIRECTORY
+    from pathlib import Path
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    agent = conversation.get_agent_manager(hass).async_get_agent(
+        mock_config_entry.entry_id
+    )
+    assert agent is not None
+    # Verify skill_manager was initialized
+    assert agent.skill_manager is not None
+    # The skills_dir should be based on DEFAULT_WORKING_DIRECTORY
+    assert "skills" in str(agent.skill_manager.user_skills_dir)

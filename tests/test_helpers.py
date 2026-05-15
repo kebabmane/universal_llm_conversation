@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.universal_llm_conversation.helpers import (
     _resolve_capabilities,
+    async_fetch_models,
+    get_exposed_entities,
     get_provider,
     sanitize_for_speech,
     shorten_tool_call_id,
@@ -128,3 +130,102 @@ class TestGetProvider:
                 model="test",
                 timeout=60.0,
             )
+
+
+class TestGetExposedEntities:
+    """Test exposed entity retrieval with aliases."""
+
+    def test_returns_entities_with_aliases(self) -> None:
+        from homeassistant.core import HomeAssistant
+        from homeassistant.helpers import entity_registry as er
+
+        hass = MagicMock()
+        hass.states = MagicMock()
+        state = MagicMock()
+        state.entity_id = "light.test"
+        state.name = "Test Light"
+        state.state = "on"
+        hass.states.async_all.return_value = [state]
+
+        registry_entry = MagicMock()
+        registry_entry.aliases = {"alias1", "alias2"}
+        registry_mock = MagicMock()
+        registry_mock.async_get.return_value = registry_entry
+
+        with patch(
+            "custom_components.universal_llm_conversation.helpers.async_should_expose",
+            return_value=True,
+        ), patch.object(er, "async_get", return_value=registry_mock):
+            result = get_exposed_entities(hass)
+
+        assert len(result) == 1
+        assert result[0]["entity_id"] == "light.test"
+        assert set(result[0]["aliases"]) == {"alias1", "alias2"}
+
+    def test_returns_empty_when_none_exposed(self) -> None:
+        hass = MagicMock()
+        hass.states = MagicMock()
+        hass.states.async_all.return_value = []
+
+        with patch(
+            "custom_components.universal_llm_conversation.helpers.async_should_expose",
+            return_value=False,
+        ):
+            result = get_exposed_entities(hass)
+
+        assert result == []
+
+
+class TestAsyncFetchModels:
+    """Test model fetching from OpenAI-compatible endpoint."""
+
+    async def test_fetch_filters_non_chat_models(self) -> None:
+        hass = MagicMock()
+
+        mock_model1 = MagicMock()
+        mock_model1.id = "gpt-4o"
+        mock_model2 = MagicMock()
+        mock_model2.id = "text-embedding-3"
+        mock_model3 = MagicMock()
+        mock_model3.id = "tts-1"
+
+        async def mock_list(*args, **kwargs):
+            for m in [mock_model1, mock_model2, mock_model3]:
+                yield m
+
+        with patch(
+            "custom_components.universal_llm_conversation.helpers.AsyncOpenAI"
+        ) as mock_client:
+            mock_client.return_value.models.list = MagicMock(return_value=mock_list())
+            hass.async_add_executor_job = AsyncMock(side_effect=lambda target, *args: target(*args))
+
+            result = await async_fetch_models(hass, "key", "http://localhost:1234/v1")
+
+        assert result == ["gpt-4o"]
+
+    async def test_fetch_returns_empty_on_exception(self) -> None:
+        hass = MagicMock()
+        hass.async_add_executor_job = AsyncMock(side_effect=ConnectionError("refused"))
+
+        with patch(
+            "custom_components.universal_llm_conversation.helpers.AsyncOpenAI"
+        ):
+            result = await async_fetch_models(hass, "key", "http://bad-url")
+
+        assert result == []
+
+
+class TestSanitizeEdgeCases:
+    """Test sanitize_for_speech edge cases."""
+
+    def test_returns_none_for_bare_tool_call(self) -> None:
+        result = sanitize_for_speech("end_conversation()")
+        assert result is None
+
+    def test_strips_dynamic_function_names(self) -> None:
+        result = sanitize_for_speech('execute_services(list=[{"domain":"light"}])', function_names=["execute_services"])
+        assert result is None
+
+    def test_returns_original_for_empty_string(self) -> None:
+        result = sanitize_for_speech("")
+        assert result == ""

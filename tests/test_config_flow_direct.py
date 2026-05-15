@@ -8,6 +8,7 @@ import pytest
 
 from custom_components.universal_llm_conversation.config_flow import (
     UniversalLLMConversationConfigFlow,
+    _get_base_url_from_preset,
     validate_input,
 )
 from custom_components.universal_llm_conversation.const import DOMAIN
@@ -51,6 +52,47 @@ class TestValidateInput:
                     "base_url": "http://bad-url",
                 },
             )
+
+    async def test_skip_authentication_bypasses_validation(self) -> None:
+        hass = MagicMock()
+        with patch(
+            "custom_components.universal_llm_conversation.config_flow.get_provider",
+        ) as mock_get_provider:
+            await validate_input(
+                hass,
+                {
+                    "api_key": "",
+                    "provider": "openai_compatible",
+                    "base_url": "http://localhost:1234/v1",
+                    "skip_authentication": True,
+                },
+            )
+        mock_get_provider.assert_not_called()
+
+
+class TestGetBaseUrlFromPreset:
+    """Test base URL resolution from preset."""
+
+    def test_manual_override_different_from_preset(self) -> None:
+        result = _get_base_url_from_preset({
+            "provider_preset": "fireworks",
+            "base_url": "https://custom.example.com/v1",
+        })
+        assert result == "https://custom.example.com/v1"
+
+    def test_uses_preset_default_when_no_manual(self) -> None:
+        result = _get_base_url_from_preset({
+            "provider_preset": "fireworks",
+            "base_url": "",
+        })
+        assert "fireworks" in result
+
+    def test_returns_none_for_custom_preset(self) -> None:
+        result = _get_base_url_from_preset({
+            "provider_preset": "custom",
+            "base_url": "",
+        })
+        assert result is None
 
 
 class TestConfigFlowClass:

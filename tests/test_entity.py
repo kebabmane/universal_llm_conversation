@@ -179,3 +179,118 @@ async def test_execute_function_tool_direct(
             [],
         )
         assert result.tool_result == {"result": "MockResult"}
+
+
+class TestEntityHelpers:
+    """Test entity helper methods directly."""
+
+    def test_adjust_schema_strict_mode(self) -> None:
+        from custom_components.universal_llm_conversation.entity import _adjust_schema
+        schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "count": {"type": "integer"},
+            },
+        }
+        _adjust_schema(schema, strict=True)
+        assert schema["strict"] is True
+        assert schema["additionalProperties"] is False
+        assert "name" in schema["required"]
+        assert schema["properties"]["name"]["type"] == ["string", "null"]
+
+    def test_adjust_schema_non_strict_mode(self) -> None:
+        from custom_components.universal_llm_conversation.entity import _adjust_schema
+        schema = {
+            "type": "object",
+            "strict": True,
+            "additionalProperties": False,
+            "properties": {
+                "name": {"type": "string"},
+            },
+        }
+        _adjust_schema(schema, strict=False)
+        assert "strict" not in schema
+        assert "additionalProperties" not in schema
+
+    def test_adjust_schema_nested_object(self) -> None:
+        from custom_components.universal_llm_conversation.entity import _adjust_schema
+        schema = {
+            "type": "object",
+            "properties": {
+                "nested": {
+                    "type": "object",
+                    "properties": {
+                        "inner": {"type": "string"},
+                    },
+                },
+            },
+        }
+        _adjust_schema(schema, strict=True)
+        assert "nested" in schema["required"]
+        assert "inner" in schema["properties"]["nested"]["required"]
+
+    def test_adjust_schema_array_items(self) -> None:
+        from custom_components.universal_llm_conversation.entity import _adjust_schema
+        schema = {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+        }
+        _adjust_schema(schema, strict=True)
+        # Primitive array items are not changed (only object types get nullable)
+        assert schema["properties"]["items"]["items"]["type"] == "string"
+        # The array property itself is required
+        assert "items" in schema["required"]
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_should_run_in_background(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+        assert agent._should_run_in_background({"delay": 5}) is True
+        assert agent._should_run_in_background({"foo": "bar"}) is False
+        assert agent._should_run_in_background(None) is False
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_truncate_message_history_clear(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        chat_log = MagicMock()
+        chat_log.content = [
+            conversation.SystemContent(content="sys"),
+            conversation.UserContent(content="hi"),
+            conversation.AssistantContent(agent_id="a", content="hello"),
+            conversation.UserContent(content="bye"),
+            conversation.AssistantContent(agent_id="a", content="goodbye"),
+        ]
+        await agent._truncate_message_history(chat_log)
+        # Should delete everything between system prompt (index 0) and last user (index 3)
+        assert len(chat_log.content) == 3
+        assert chat_log.content[0].content == "sys"
+        assert isinstance(chat_log.content[1], conversation.UserContent)
+        assert chat_log.content[1].content == "bye"
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_get_function_tools_error_handling(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        from custom_components.universal_llm_conversation.exceptions import FunctionLoadFailed, InvalidFunction
+
+        with patch("yaml.safe_load", side_effect=InvalidFunction("bad yaml")):
+            with pytest.raises(InvalidFunction):
+                agent._get_function_tools()
+
+        with patch("yaml.safe_load", side_effect=RuntimeError("unexpected")):
+            with pytest.raises(FunctionLoadFailed):
+                agent._get_function_tools()
+
+

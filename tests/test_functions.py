@@ -410,3 +410,80 @@ class TestReadFileFunction:
         func = ReadFileFunction()
         with pytest.raises(InvalidFunction):
             func.validate_schema({})
+
+    async def test_template_path_rendering(self) -> None:
+        from homeassistant.helpers.template import Template
+        from pathlib import Path
+
+        hass = MagicMock()
+        func = ReadFileFunction()
+
+        with patch.object(Template, "async_render", return_value="/tmp/rendered.txt"), \
+             patch.object(Path, "is_file", return_value=True), \
+             patch.object(Path, "read_text", return_value="rendered content"):
+            result = await func.execute(
+                hass=hass,
+                function_config={"path": "/tmp/{{ filename }}.txt"},
+                arguments={"filename": "rendered"},
+                llm_context=None,
+                exposed_entities=[],
+            )
+
+        assert result == "rendered content"
+
+
+class TestBaseFunction:
+    """Test BaseFunction abstract methods."""
+
+    async def test_execute_raises_not_implemented(self) -> None:
+        from custom_components.universal_llm_conversation.functions import BaseFunction
+        func = BaseFunction()
+        with pytest.raises(NotImplementedError):
+            await func.execute(None, {}, {}, None, [])
+
+    def test_validate_schema_returns_config(self) -> None:
+        from custom_components.universal_llm_conversation.functions import BaseFunction
+        func = BaseFunction()
+        assert func.validate_schema({"foo": "bar"}) == {"foo": "bar"}
+
+
+class TestBashFunctionValidation:
+    """Test BashFunction schema validation."""
+
+    def test_validate_schema_requires_command(self) -> None:
+        func = BashFunction()
+        with pytest.raises(InvalidFunction):
+            func.validate_schema({})
+
+    def test_validate_schema_accepts_command(self) -> None:
+        func = BashFunction()
+        result = func.validate_schema({"command": "echo hello"})
+        assert result == {"command": "echo hello"}
+
+
+class TestScriptFunctionValidation:
+    """Test ScriptFunction schema validation."""
+
+    def test_validate_schema_requires_sequence(self) -> None:
+        func = ScriptFunction()
+        with pytest.raises(InvalidFunction):
+            func.validate_schema({})
+
+    def test_validate_schema_accepts_sequence(self) -> None:
+        func = ScriptFunction()
+        result = func.validate_schema({"sequence": [{"delay": 1}]})
+        assert result == {"sequence": [{"delay": 1}]}
+
+
+class TestCompositeFunctionValidation:
+    """Test CompositeFunction schema validation."""
+
+    def test_validate_schema_requires_sequence(self) -> None:
+        func = CompositeFunction()
+        with pytest.raises(InvalidFunction):
+            func.validate_schema({})
+
+    def test_validate_schema_accepts_sequence(self) -> None:
+        func = CompositeFunction()
+        result = func.validate_schema({"sequence": [{"type": "template", "value_template": "hi"}]})
+        assert result == {"sequence": [{"type": "template", "value_template": "hi"}]}

@@ -459,6 +459,16 @@ class TestStreamChat:
         assert "strict" not in params
         assert "additionalProperties" not in params
 
+    async def test_exception_propagates_from_api_call(self, provider: OpenAICompatibleProvider) -> None:
+        """Test that exceptions from the underlying client are re-raised."""
+        provider._client.chat.completions.create = AsyncMock(
+            side_effect=ConnectionError("API down")
+        )
+
+        with pytest.raises(ConnectionError, match="API down"):
+            async for _ in provider.stream_chat([], None, {}):
+                pass
+
     @staticmethod
     async def _async_iter(items: list[MagicMock]) -> AsyncGenerator[MagicMock, None]:
         for item in items:

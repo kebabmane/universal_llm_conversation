@@ -134,6 +134,16 @@ class TestSkillManagerDownload:
 
         assert result is False
 
+    async def test_skips_non_directory_entries(self, tmp_path: Path) -> None:
+        hass = MagicMock(spec=HomeAssistant)
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        # Place a file instead of a directory
+        (skills_dir / "not_a_skill.txt").write_text("I'm a file")
+
+        manager = await SkillManager.async_get_instance(hass, str(skills_dir))
+        assert manager.get_all_skills() == []
+
     async def test_download_network_error(self, tmp_path: Path) -> None:
         hass = MagicMock(spec=HomeAssistant)
         skills_dir = tmp_path / "skills"

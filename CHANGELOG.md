@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-05-15
+
+### Testing
+- **Final coverage push** — 34 additional tests closing the last 12% gap
+- **helpers.py**: `get_exposed_entities` alias resolution, `async_fetch_models` HTTP mock with keyword filtering, `sanitize_for_speech` edge cases (bare tool calls, dynamic function names, empty strings). Coverage: 82% → 99%
+- **entity.py**: `_adjust_schema` recursive strict/non-strict mutations, `_truncate_message_history` clear strategy, `_should_run_in_background` delay detection, `_get_function_tools` error handling (InvalidFunction, FunctionLoadFailed), `_execute_function_tool` direct invocation. Coverage: 69% → 85%
+- **services.py**: Service handler tests for `reload_skills` and `download_skill` (success + failure). Coverage: 62% → 100%
+- **functions.py**: BaseFunction.execute() NotImplementedError, BashFunction/ScriptFunction/CompositeFunction validate_schema with/without required keys, ReadFileFunction template path rendering. Coverage: 95% → 100%
+- **skills.py**: Non-directory entry skip during load. Coverage: 99% → 100%
+- **providers/openai_compatible.py**: Exception propagation from API call. Coverage: 98% → 100%
+- **config_flow.py**: `_get_base_url_from_preset` override/preset/custom logic, `skip_authentication` bypass validation. Coverage: 84% → 85%
+- **Overall test count**: 119 → 153 tests, coverage 88% → 94%
+
 ## [0.1.3] - 2026-05-15
 
 ### Testing
