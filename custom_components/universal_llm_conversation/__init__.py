@@ -11,7 +11,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_PROVIDER_PRESET, DOMAIN
+from .const import CONF_PROVIDER_PRESET, DOMAIN, PRESET_TO_PROVIDER
 from .helpers import _get_base_url_from_preset, get_provider
 from .services import async_setup_services
 
@@ -32,14 +32,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: UniversalLLMConfigEntry
 ) -> bool:
     data = entry.data
-    provider_key = data.get("provider", "openai_compatible")
+    preset_key = data.get(CONF_PROVIDER_PRESET, "custom")
+    provider_key = data.get("provider") or PRESET_TO_PROVIDER.get(preset_key, "openai_compatible")
     api_key = data.get("api_key", "")
     # Resolve base_url from preset if not stored directly (e.g. preset with known URL)
     base_url = data.get("base_url") or _get_base_url_from_preset(data)
     api_version = data.get("api_version")
     organization = data.get("organization")
     skip_auth = data.get("skip_authentication", False)
-    preset_key = data.get(CONF_PROVIDER_PRESET, "custom")
 
     if not skip_auth and preset_key != "fireworks_firepass":
         try:

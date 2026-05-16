@@ -76,6 +76,19 @@ PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_GEMINI = "gemini"
 
+# Mapping from UI preset to internal provider key
+PRESET_TO_PROVIDER = {
+    "fireworks": PROVIDER_OPENAI_COMPATIBLE,
+    "fireworks_firepass": PROVIDER_OPENAI_COMPATIBLE,
+    "openai": PROVIDER_OPENAI_COMPATIBLE,
+    "ollama": PROVIDER_OPENAI_COMPATIBLE,
+    "openrouter": PROVIDER_OPENAI_COMPATIBLE,
+    "azure": PROVIDER_OPENAI_COMPATIBLE,
+    "custom": PROVIDER_OPENAI_COMPATIBLE,
+    "anthropic": PROVIDER_ANTHROPIC,
+    "gemini": PROVIDER_GEMINI,
+}
+
 API_PROVIDERS = [
     {"key": PROVIDER_OPENAI_COMPATIBLE, "label": "OpenAI Compatible (Fireworks, Ollama, OpenRouter, Firepass, etc.)"},
     {"key": PROVIDER_ANTHROPIC, "label": "Anthropic (Claude)"},

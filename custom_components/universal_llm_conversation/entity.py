@@ -41,6 +41,7 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     DOMAIN,
+    PRESET_TO_PROVIDER,
 )
 from .exceptions import FunctionNotFound, ParseArgumentsFailed, TokenLengthExceededError
 from .functions import get_function
@@ -166,9 +167,12 @@ class UniversalLLMBaseEntity(Entity):
         timeout = options.get(CONF_REQUEST_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
         # Resolve base_url from preset when not explicitly stored (e.g. preset providers)
         base_url = data.get("base_url") or _get_base_url_from_preset(data)
+        # Resolve provider key from preset when not explicitly stored
+        preset_key = data.get("provider_preset", "custom")
+        provider_key = data.get("provider") or PRESET_TO_PROVIDER.get(preset_key, "openai_compatible")
         return get_provider(
             hass=self.hass,
-            provider_key=data.get("provider", "openai_compatible"),
+            provider_key=provider_key,
             api_key=data.get("api_key", ""),
             base_url=base_url,
             api_version=data.get("api_version"),

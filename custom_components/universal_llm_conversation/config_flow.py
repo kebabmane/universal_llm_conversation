@@ -77,6 +77,7 @@ from .const import (
     DEFAULT_TOP_P,
     DOMAIN,
     FIREPASS_MODELS,
+    PRESET_TO_PROVIDER,
     PROVIDER_PRESETS,
 )
 from .helpers import async_fetch_models, get_provider, _get_base_url_from_preset
@@ -116,11 +117,12 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     - cannot_connect
     """
     api_key = data[CONF_API_KEY]
-    base_url = _get_base_url_from_preset(data)
+    base_url = data.get(CONF_BASE_URL) or _get_base_url_from_preset(data)
     api_version = data.get(CONF_API_VERSION)
     organization = data.get(CONF_ORGANIZATION)
     skip_auth = data.get(CONF_SKIP_AUTHENTICATION, False)
-    provider_key = data.get("provider", "openai_compatible")
+    preset_key = data.get(CONF_PROVIDER_PRESET, "custom")
+    provider_key = data.get("provider") or PRESET_TO_PROVIDER.get(preset_key, "openai_compatible")
 
     if skip_auth:
         return
@@ -264,6 +266,11 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             resolved_base_url = _get_base_url_from_preset(user_data)
             if resolved_base_url:
                 user_data[CONF_BASE_URL] = resolved_base_url
+
+            # Store the resolved provider key so runtime code doesn't need to
+            # guess from the preset
+            preset_key = user_data.get(CONF_PROVIDER_PRESET, "custom")
+            user_data["provider"] = PRESET_TO_PROVIDER.get(preset_key, "openai_compatible")
 
             return self.async_create_entry(
                 title=user_data.get(CONF_NAME, DEFAULT_NAME),

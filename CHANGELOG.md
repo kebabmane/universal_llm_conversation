@@ -139,6 +139,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 - **165 tests, 94% coverage** — Added test for `_get_provider()` base_url resolution from preset at conversation runtime
 
+## [0.1.13] - 2026-05-16
+
+### Fixed
+- **`provider` key mismatch — runtime code always defaulted to `openai_compatible`** — The config entry stores `provider_preset` (e.g. `"fireworks"`, `"anthropic"`), but `__init__.py`, `entity.py`, and `config_flow.py` were all reading `data.get("provider", "openai_compatible")`. Since `provider` was never stored in entry data, it always fell back to `"openai_compatible"`. This is currently harmless (all presets are OpenAI-compatible), but would silently break when native Anthropic/Gemini providers are added:
+  - Added `PRESET_TO_PROVIDER` mapping in `const.py` that maps each preset to its internal provider key
+  - `config_flow.py` `async_step_model()` now persists the resolved `provider` key in entry data
+  - `__init__.py`, `entity.py`, and `config_flow.py` `validate_input()` now resolve `provider` from `provider_preset` via `PRESET_TO_PROVIDER` as a fallback
+- **Code style consistency** — `validate_input()` in `config_flow.py` now uses the same `data.get(CONF_BASE_URL) or _get_base_url_from_preset(data)` pattern as `__init__.py` and `entity.py`
+
+### Testing
+- **166 tests, 94% coverage** — Added test for `_get_provider()` provider key resolution from preset at runtime
+
 ## [Unreleased]
 
 - Native Anthropic provider
