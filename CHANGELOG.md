@@ -60,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native Anthropic (Claude) and Google Gemini providers are not yet implemented; use the OpenAI Compatible provider with their proxy endpoints (e.g., LiteLLM, OpenRouter) as a workaround
 - `ai_task_data` subentry type is defined but not fully wired into the AI Task platform yet
 
+## [0.1.6] - 2026-05-16
+
+### Changed
+- **3-step config flow** — Replaced two-step setup with a clearer three-step wizard:
+  1. Select provider preset (e.g. Fireworks AI, OpenAI, Ollama)
+  2. Enter API credentials (API key shown; `base_url`, `api_version`, and `organization` only appear for Custom/Azure providers)
+  3. Choose chat model from fetched dropdown or enter manually
+- **Conditional credential fields** — `base_url` is no longer shown when a preset already knows its URL (e.g. Fireworks, OpenRouter, Ollama), reducing confusion
+
 ## [Unreleased]
 
 - Native Anthropic provider
