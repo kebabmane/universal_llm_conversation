@@ -7,8 +7,7 @@ import re
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceNotFound, TemplateError
-from homeassistant.helpers import config_validation as cv
+
 from homeassistant.helpers.template import Template
 import voluptuous as vol
 

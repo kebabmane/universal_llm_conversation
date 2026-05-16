@@ -25,31 +25,37 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import UniversalLLMConfigEntry
 from .const import (
     CONF_FALLBACK_MODEL,
-    CONF_FUNCTION_TOOLS,
-    CONF_HIDE_THINKING,
     CONF_PROMPT,
-    CONF_REQUEST_TIMEOUT,
     CONF_SKILLS,
-    DEFAULT_CONF_FUNCTION_TOOLS,
-    DEFAULT_HIDE_THINKING,
     DEFAULT_PROMPT,
     DEFAULT_WORKING_DIRECTORY,
     DOMAIN,
     EVENT_CONVERSATION_FINISHED,
 )
 from .entity import UniversalLLMBaseEntity
-from .exceptions import FunctionLoadFailed, FunctionNotFound, InvalidFunction
 from .helpers import get_exposed_entities, sanitize_for_speech
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
 
-# Fallback-eligible errors
-_FALLBACK_ELIGIBLE_ERRORS = (
-    TimeoutError,
-    ConnectionError,
-    Exception,  # Broad for now; refined per provider in future
-)
+
+def _is_retryable_error(err: Exception) -> bool:
+    """Classify whether an exception warrants fallback retry.
+
+    Retryable: network issues, timeouts, rate-limits (429), server errors (5xx).
+    Not retryable: auth failures (401), bad requests (400), etc.
+    """
+    if isinstance(err, (TimeoutError, ConnectionError)):
+        return True
+    try:
+        from openai import APIStatusError, APITimeoutError, APIConnectionError
+    except ImportError:
+        return False
+    if isinstance(err, (APITimeoutError, APIConnectionError)):
+        return True
+    if isinstance(err, APIStatusError):
+        return err.status_code == 429 or err.status_code >= 500
+    return False
 
 
 async def async_setup_entry(
@@ -124,10 +130,13 @@ class UniversalLLMAgentEntity(
 
         fallback_model = self.subentry.data.get(CONF_FALLBACK_MODEL, "")
         last_error: Exception | None = None
+        outcome = "success"
+        error_type: str | None = None
+        usage: dict[str, int] | None = None
 
         # Try primary model
         try:
-            await self._async_handle_chat_log(
+            usage = await self._async_handle_chat_log(
                 chat_log,
                 function_tools=function_tools,
                 exposed_entities=exposed_entities,
@@ -135,10 +144,11 @@ class UniversalLLMAgentEntity(
             )
         except Exception as err:
             last_error = err
+            error_type = type(err).__name__
             _LOGGER.warning("Primary model failed: %s", err)
 
-            # Try fallback if configured
-            if fallback_model:
+            # Try fallback only for retryable errors
+            if _is_retryable_error(err) and fallback_model:
                 try:
                     _LOGGER.info("Falling back to model: %s", fallback_model)
                     # Reset chat log to before the failed assistant turn
@@ -149,17 +159,22 @@ class UniversalLLMAgentEntity(
                     ):
                         chat_log.content.pop()
 
-                    await self._async_handle_chat_log(
+                    usage = await self._async_handle_chat_log(
                         chat_log,
                         function_tools=function_tools,
                         exposed_entities=exposed_entities,
                         llm_context=llm_context,
                         model_override=fallback_model,
                     )
+                    outcome = "fallback_used"
                     last_error = None
                 except Exception as fallback_err:
                     last_error = fallback_err
+                    error_type = f"fallback_{type(fallback_err).__name__}"
                     _LOGGER.error("Fallback model also failed: %s", fallback_err)
+                    outcome = "failed"
+            else:
+                outcome = "failed"
 
         if last_error:
             intent_response = intent.IntentResponse(language=user_input.language)
@@ -172,19 +187,22 @@ class UniversalLLMAgentEntity(
                 conversation_id=user_input.conversation_id,
             )
 
-        # Fire event
-        self.hass.bus.async_fire(
-            EVENT_CONVERSATION_FINISHED,
-            {
-                "user_input": {
-                    "text": user_input.text,
-                    "conversation_id": user_input.conversation_id,
-                    "language": user_input.language,
-                },
-                "messages": [c.as_dict() for c in chat_log.content],
-                "agent_id": self.subentry.subentry_id,
+        # Build event payload
+        event_payload: dict[str, Any] = {
+            "user_input": {
+                "text": user_input.text,
+                "conversation_id": user_input.conversation_id,
+                "language": user_input.language,
             },
-        )
+            "messages": [c.as_dict() for c in chat_log.content],
+            "agent_id": self.subentry.subentry_id,
+            "outcome": outcome,
+            "error_type": error_type,
+        }
+        if usage is not None:
+            event_payload["usage"] = usage
+
+        self.hass.bus.async_fire(EVENT_CONVERSATION_FINISHED, event_payload)
 
         # Build response with sanitization
         intent_response = intent.IntentResponse(language=user_input.language)

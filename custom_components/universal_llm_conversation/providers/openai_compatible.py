@@ -5,11 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncGenerator
-from functools import partial
-from typing import Any
-
 from openai import AsyncAzureOpenAI, AsyncOpenAI
-from openai.types.chat import ChatCompletionChunk
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError

@@ -212,6 +212,97 @@ class TestValidateConnection:
         result = await provider.validate_connection()
         assert result is True
 
+    async def test_validate_connection_authentication_error(self) -> None:
+        """Test that AuthenticationError maps to invalid_auth."""
+        from openai import AuthenticationError
+        from homeassistant.exceptions import HomeAssistantError
+
+        hass = MagicMock(spec=HomeAssistant)
+        hass.data = {}
+        with patch(
+            "custom_components.universal_llm_conversation.providers.openai_compatible.get_async_client",
+            side_effect=_mocked_get_async_client,
+        ):
+            provider = OpenAICompatibleProvider(
+                hass=hass,
+                api_key="bad-key",
+                base_url=None,
+                api_version=None,
+                organization=None,
+                model="gpt-4o",
+                capabilities=OPENAI_COMPATIBLE_CAPABILITIES,
+                timeout=60.0,
+            )
+        err = AuthenticationError(
+            message="Invalid API key",
+            response=MagicMock(status_code=401),
+            body={"error": {"message": "Invalid API key"}},
+        )
+        provider._client.models.list = MagicMock(side_effect=err)
+
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await provider.validate_connection()
+        assert str(exc_info.value) == "invalid_auth"
+
+    async def test_validate_connection_timeout_error(self) -> None:
+        """Test that APITimeoutError maps to timeout."""
+        from openai import APITimeoutError
+        from homeassistant.exceptions import HomeAssistantError
+
+        hass = MagicMock(spec=HomeAssistant)
+        hass.data = {}
+        with patch(
+            "custom_components.universal_llm_conversation.providers.openai_compatible.get_async_client",
+            side_effect=_mocked_get_async_client,
+        ):
+            provider = OpenAICompatibleProvider(
+                hass=hass,
+                api_key="key",
+                base_url=None,
+                api_version=None,
+                organization=None,
+                model="gpt-4o",
+                capabilities=OPENAI_COMPATIBLE_CAPABILITIES,
+                timeout=60.0,
+            )
+        provider._client.models.list = MagicMock(side_effect=APITimeoutError(request=MagicMock()))
+
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await provider.validate_connection()
+        assert str(exc_info.value) == "timeout"
+
+    async def test_validate_connection_api_status_error(self) -> None:
+        """Test that non-403 APIStatusError maps to cannot_connect."""
+        from openai import APIStatusError
+        from homeassistant.exceptions import HomeAssistantError
+
+        hass = MagicMock(spec=HomeAssistant)
+        hass.data = {}
+        with patch(
+            "custom_components.universal_llm_conversation.providers.openai_compatible.get_async_client",
+            side_effect=_mocked_get_async_client,
+        ):
+            provider = OpenAICompatibleProvider(
+                hass=hass,
+                api_key="key",
+                base_url=None,
+                api_version=None,
+                organization=None,
+                model="gpt-4o",
+                capabilities=OPENAI_COMPATIBLE_CAPABILITIES,
+                timeout=60.0,
+            )
+        err = APIStatusError(
+            message="Internal server error",
+            response=MagicMock(status_code=500),
+            body={"error": {"message": "Internal server error"}},
+        )
+        provider._client.models.list = MagicMock(side_effect=err)
+
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await provider.validate_connection()
+        assert str(exc_info.value) == "cannot_connect"
+
 
 class TestStreamChat:
     """Direct tests for stream_chat yielding correct chunks."""

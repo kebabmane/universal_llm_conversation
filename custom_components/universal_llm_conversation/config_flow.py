@@ -38,7 +38,6 @@ from .const import (
     CONF_BASE_URL,
     CONF_CHAT_MODEL,
     CONF_CONTEXT_THRESHOLD,
-    CONF_CONTEXT_TRUNCATE_STRATEGY,
     CONF_FALLBACK_MODEL,
     CONF_FUNCTION_TOOLS,
     CONF_HIDE_THINKING,
@@ -54,13 +53,10 @@ from .const import (
     CONF_SKIP_AUTHENTICATION,
     CONF_TEMPERATURE,
     CONF_TOP_P,
-    CONTEXT_TRUNCATE_STRATEGIES,
     DEFAULT_ADVANCED_OPTIONS,
-    DEFAULT_AI_TASK_NAME,
-    DEFAULT_AI_TASK_OPTIONS,
+
     DEFAULT_CHAT_MODEL,
     DEFAULT_CONTEXT_THRESHOLD,
-    DEFAULT_CONTEXT_TRUNCATE_STRATEGY,
     DEFAULT_CONVERSATION_NAME,
     DEFAULT_FALLBACK_MODEL,
     DEFAULT_CONF_FUNCTION_TOOLS,
@@ -97,7 +93,6 @@ DEFAULT_OPTIONS = types.MappingProxyType(
         CONF_TEMPERATURE: DEFAULT_TEMPERATURE,
         CONF_FUNCTION_TOOLS: DEFAULT_CONF_FUNCTION_TOOLS_STR,
         CONF_CONTEXT_THRESHOLD: DEFAULT_CONTEXT_THRESHOLD,
-        CONF_CONTEXT_TRUNCATE_STRATEGY: DEFAULT_CONTEXT_TRUNCATE_STRATEGY,
         CONF_SHORTEN_TOOL_CALL_ID: DEFAULT_SHORTEN_TOOL_CALL_ID,
         CONF_ADVANCED_OPTIONS: DEFAULT_ADVANCED_OPTIONS,
         CONF_SCHEMA_STRICT: DEFAULT_SCHEMA_STRICT,
@@ -282,12 +277,6 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                         "title": DEFAULT_CONVERSATION_NAME,
                         "unique_id": None,
                     },
-                    {
-                        "subentry_type": "ai_task_data",
-                        "data": dict(DEFAULT_AI_TASK_OPTIONS),
-                        "title": DEFAULT_AI_TASK_NAME,
-                        "unique_id": None,
-                    },
                 ],
             )
 
@@ -366,7 +355,6 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> dict[str, type[ConfigSubentryFlow]]:
         return {
             "conversation": UniversalLLMSubentryFlowHandler,
-            "ai_task_data": UniversalLLMAITaskSubentryFlowHandler,
         }
 
 
@@ -410,7 +398,10 @@ class UniversalLLMSubentryFlowHandler(ConfigSubentryFlow):
             if self._is_new:
                 title = user_input.get(CONF_NAME, DEFAULT_NAME)
                 user_input.pop(CONF_NAME, None)
+                # advanced_options is flow-control only; do not persist
+                user_input.pop(CONF_ADVANCED_OPTIONS, None)
                 return self.async_create_entry(title=title, data=user_input)
+            user_input.pop(CONF_ADVANCED_OPTIONS, None)
             return self.async_update_and_abort(
                 self._get_entry(),
                 self._get_reconfigure_subentry(),
@@ -513,17 +504,6 @@ class UniversalLLMSubentryFlowHandler(ConfigSubentryFlow):
             ): TemplateSelector(),
             vol.Optional(CONF_CONTEXT_THRESHOLD, default=DEFAULT_CONTEXT_THRESHOLD): int,
             vol.Optional(
-                CONF_CONTEXT_TRUNCATE_STRATEGY, default=DEFAULT_CONTEXT_TRUNCATE_STRATEGY
-            ): SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value=s["key"], label=s["label"])
-                        for s in CONTEXT_TRUNCATE_STRATEGIES
-                    ],
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Optional(
                 CONF_ADVANCED_OPTIONS, default=DEFAULT_ADVANCED_OPTIONS
             ): BooleanSelector(),
         }
@@ -538,99 +518,4 @@ class UniversalLLMSubentryFlowHandler(ConfigSubentryFlow):
         return schema
 
 
-class UniversalLLMAITaskSubentryFlowHandler(ConfigSubentryFlow):
-    """Flow for AI Task subentries."""
 
-    options: dict[str, Any]
-    _temp_data: dict[str, Any] | None = None
-
-    @property
-    def _is_new(self) -> bool:
-        return self.source == "user"
-
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        self.options = dict(DEFAULT_AI_TASK_OPTIONS)
-        return await self.async_step_init()
-
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        self.options = dict(self._get_reconfigure_subentry().data)
-        return await self.async_step_init()
-
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        if self._get_entry().state != ConfigEntryState.LOADED:
-            return self.async_abort(reason="entry_not_loaded")
-
-        if user_input is not None:
-            if user_input.get(CONF_ADVANCED_OPTIONS, False):
-                self._temp_data = user_input
-                return await self.async_step_advanced()
-            if self._is_new:
-                title = user_input.get(CONF_NAME, DEFAULT_AI_TASK_NAME)
-                user_input.pop(CONF_NAME, None)
-                return self.async_create_entry(title=title, data=user_input)
-            return self.async_update_and_abort(
-                self._get_entry(),
-                self._get_reconfigure_subentry(),
-                data=user_input,
-            )
-
-        schema: dict = {}
-        if self._is_new:
-            schema[vol.Optional(CONF_NAME, default=DEFAULT_AI_TASK_NAME)] = str
-        schema.update(
-            {
-                vol.Optional(CONF_CHAT_MODEL, default=DEFAULT_CHAT_MODEL): str,
-                vol.Optional(CONF_MAX_TOKENS, default=DEFAULT_MAX_TOKENS): int,
-                vol.Optional(
-                    CONF_ADVANCED_OPTIONS, default=DEFAULT_ADVANCED_OPTIONS
-                ): BooleanSelector(),
-            }
-        )
-        return self.async_show_form(
-            step_id="init",
-            data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(schema), self.options
-            ),
-        )
-
-    async def async_step_advanced(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        if user_input is not None:
-            final_data = {**(self._temp_data or {}), **user_input}
-            if self._is_new:
-                title = final_data.get(CONF_NAME, DEFAULT_AI_TASK_NAME)
-                final_data.pop(CONF_NAME, None)
-                return self.async_create_entry(title=title, data=final_data)
-            return self.async_update_and_abort(
-                self._get_entry(),
-                self._get_reconfigure_subentry(),
-                data=final_data,
-            )
-
-        schema: dict[Any, Any] = {
-            vol.Optional(
-                CONF_TEMPERATURE, default=DEFAULT_TEMPERATURE
-            ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
-            vol.Optional(
-                CONF_TOP_P, default=DEFAULT_TOP_P
-            ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.05)),
-            vol.Optional(
-                CONF_REQUEST_TIMEOUT, default=DEFAULT_REQUEST_TIMEOUT
-            ): NumberSelector(NumberSelectorConfig(min=10, max=300, step=5, unit_of_measurement="s")),
-            vol.Optional(
-                CONF_FALLBACK_MODEL, default=DEFAULT_FALLBACK_MODEL
-            ): str,
-        }
-        return self.async_show_form(
-            step_id="advanced",
-            data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(schema), self.options
-            ),
-        )

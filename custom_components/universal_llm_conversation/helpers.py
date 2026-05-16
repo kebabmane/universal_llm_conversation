@@ -12,7 +12,7 @@ from homeassistant.components.homeassistant.exposed_entities import async_should
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.template import Template
+
 
 from openai import AsyncOpenAI
 

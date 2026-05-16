@@ -50,7 +50,6 @@
           "functions": "Custom Functions (YAML)",
           "skills": "Enabled Skills",
           "context_threshold": "Context Token Threshold",
-          "context_truncate_strategy": "Context Truncate Strategy",
           "advanced_options": "Show Advanced Options"
         }
       },

@@ -15,9 +15,5 @@ class InvalidFunction(HomeAssistantError):
     """Invalid function configuration."""
 
 
-class ParseArgumentsFailed(HomeAssistantError):
-    """Failed to parse function arguments."""
-
-
 class TokenLengthExceededError(HomeAssistantError):
     """Response exceeded token limit."""

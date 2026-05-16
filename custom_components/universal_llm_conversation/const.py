@@ -3,7 +3,7 @@
 DOMAIN = "universal_llm_conversation"
 DEFAULT_NAME = "Universal LLM Conversation"
 DEFAULT_CONVERSATION_NAME = "Universal LLM Conversation"
-DEFAULT_AI_TASK_NAME = "Universal LLM AI Task"
+
 
 CONF_PROVIDER = "provider"
 CONF_API_KEY = "api_key"
@@ -96,7 +96,6 @@ API_PROVIDERS = [
 ]
 DEFAULT_API_PROVIDER = API_PROVIDERS[0]["key"]
 
-EVENT_AUTOMATION_REGISTERED = "automation_registered_via_universal_llm_conversation"
 EVENT_CONVERSATION_FINISHED = "universal_llm_conversation.conversation.finished"
 
 CONF_PROMPT = "prompt"
@@ -279,10 +278,6 @@ DEFAULT_CONF_FUNCTION_TOOLS = [
 
 CONF_CONTEXT_THRESHOLD = "context_threshold"
 DEFAULT_CONTEXT_THRESHOLD = 40000
-CONTEXT_TRUNCATE_STRATEGIES = [{"key": "clear", "label": "Clear All Messages"}]
-CONF_CONTEXT_TRUNCATE_STRATEGY = "context_truncate_strategy"
-DEFAULT_CONTEXT_TRUNCATE_STRATEGY = CONTEXT_TRUNCATE_STRATEGIES[0]["key"]
-
 # Advanced / compatibility options
 CONF_ADVANCED_OPTIONS = "advanced_options"
 DEFAULT_ADVANCED_OPTIONS = False
@@ -298,17 +293,6 @@ DEFAULT_REQUEST_TIMEOUT = 60
 
 CONF_FALLBACK_MODEL = "fallback_model"
 DEFAULT_FALLBACK_MODEL = ""
-
-# Service constants
-SERVICE_QUERY_IMAGE = "query_image"
-CONF_PAYLOAD_TEMPLATE = "payload_template"
-
-# AI Task default options
-DEFAULT_AI_TASK_OPTIONS = {
-    CONF_CHAT_MODEL: DEFAULT_CHAT_MODEL,
-    CONF_MAX_TOKENS: DEFAULT_MAX_TOKENS,
-    CONF_ADVANCED_OPTIONS: DEFAULT_ADVANCED_OPTIONS,
-}
 
 # Skills
 CONF_SKILLS = "skills"
@@ -342,4 +326,3 @@ SHELL_DENY_PATTERNS = [
     r":\(\)\{.*:\|:.*\}",
 ]
 FILE_READ_SIZE_LIMIT = 1024 * 1024
-DEFAULT_ALLOWED_DIRS = [DEFAULT_WORKING_DIRECTORY]

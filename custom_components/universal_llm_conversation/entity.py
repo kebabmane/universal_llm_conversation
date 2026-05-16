@@ -18,7 +18,6 @@ from homeassistant.util import slugify
 from .const import (
     CONF_CHAT_MODEL,
     CONF_CONTEXT_THRESHOLD,
-    CONF_CONTEXT_TRUNCATE_STRATEGY,
     CONF_FUNCTION_TOOLS,
     CONF_HIDE_THINKING,
     CONF_MAX_FUNCTION_CALLS_PER_CONVERSATION,
@@ -31,7 +30,6 @@ from .const import (
     CONF_TOP_P,
     DEFAULT_CHAT_MODEL,
     DEFAULT_CONTEXT_THRESHOLD,
-    DEFAULT_CONTEXT_TRUNCATE_STRATEGY,
     DEFAULT_HIDE_THINKING,
     DEFAULT_MAX_FUNCTION_CALLS_PER_CONVERSATION,
     DEFAULT_MAX_TOKENS,
@@ -43,9 +41,9 @@ from .const import (
     DOMAIN,
     PRESET_TO_PROVIDER,
 )
-from .exceptions import FunctionNotFound, ParseArgumentsFailed, TokenLengthExceededError
+from .exceptions import FunctionNotFound, TokenLengthExceededError
 from .functions import get_function
-from .helpers import _get_base_url_from_preset, get_exposed_entities, get_provider, sanitize_for_speech, shorten_tool_call_id
+from .helpers import _get_base_url_from_preset, get_exposed_entities, get_provider, shorten_tool_call_id
 from .skills import Skill, SkillManager
 
 if TYPE_CHECKING:
@@ -190,8 +188,11 @@ class UniversalLLMBaseEntity(Entity):
         structure_name: str | None = None,
         structure: vol.Schema | None = None,
         model_override: str | None = None,
-    ) -> None:
-        """Generate an answer with streaming and tool execution."""
+    ) -> dict[str, int]:
+        """Generate an answer with streaming and tool execution.
+
+        Returns accumulated token usage across all tool iterations.
+        """
         options = self.subentry.data
         provider = self._get_provider(model_override)
         max_function_calls = options.get(
@@ -236,6 +237,8 @@ class UniversalLLMBaseEntity(Entity):
                 },
             }
 
+        total_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
         # Execute conversation loop
         for n_requests in range(MAX_TOOL_ITERATIONS):
             tool_choice = "auto"
@@ -252,12 +255,17 @@ class UniversalLLMBaseEntity(Entity):
 
             pending_tool_calls: list[llm.ToolInput] = []
             reasoning_parts: list[str] = []
+            usage_accumulator: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
             async for chunk in chat_log.async_add_delta_content_stream(
-                self.entity_id, self._transform_stream(chat_log, stream, hide_thinking, reasoning_parts)
+                self.entity_id, self._transform_stream(chat_log, stream, hide_thinking, reasoning_parts, usage_accumulator)
             ):
                 if isinstance(chunk, conversation.AssistantContent) and chunk.tool_calls:
                     pending_tool_calls.extend(chunk.tool_calls)
+
+            total_usage["prompt_tokens"] += usage_accumulator["prompt_tokens"]
+            total_usage["completion_tokens"] += usage_accumulator["completion_tokens"]
+            total_usage["total_tokens"] += usage_accumulator["total_tokens"]
 
             if pending_tool_calls:
                 _LOGGER.debug("Tool calls: %s", pending_tool_calls)
@@ -283,12 +291,15 @@ class UniversalLLMBaseEntity(Entity):
             if not chat_log.unresponded_tool_results:
                 break
 
+        return total_usage
+
     async def _transform_stream(
         self,
         chat_log: conversation.ChatLog,
         stream: Any,
         hide_thinking: bool,
         reasoning_parts: list[str],
+        usage_accumulator: dict[str, int],
     ) -> Any:
         """Transform provider stream to Home Assistant format."""
         current_tool_calls: dict[int, dict[str, Any]] = {}
@@ -309,6 +320,9 @@ class UniversalLLMBaseEntity(Entity):
                         }
                     }
                 )
+                usage_accumulator["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                usage_accumulator["completion_tokens"] += usage.get("completion_tokens", 0)
+                usage_accumulator["total_tokens"] += usage.get("total_tokens", 0)
                 total = usage.get("total_tokens", 0)
                 if total > self.subentry.data.get(CONF_CONTEXT_THRESHOLD, DEFAULT_CONTEXT_THRESHOLD):
                     await self._truncate_message_history(chat_log)
@@ -391,20 +405,16 @@ class UniversalLLMBaseEntity(Entity):
         }
 
     async def _truncate_message_history(self, chat_log: conversation.ChatLog) -> None:
-        """Truncate message history based on strategy."""
-        strategy = self.subentry.data.get(
-            CONF_CONTEXT_TRUNCATE_STRATEGY, DEFAULT_CONTEXT_TRUNCATE_STRATEGY
-        )
-        if strategy == "clear":
-            _LOGGER.info("Context threshold exceeded, clearing history")
-            messages = chat_log.content
-            last_user_index = None
-            for i in reversed(range(len(messages))):
-                if isinstance(messages[i], conversation.UserContent):
-                    last_user_index = i
-                    break
-            if last_user_index is not None:
-                del messages[1:last_user_index]
+        """Truncate message history by clearing to last user message."""
+        _LOGGER.info("Context threshold exceeded, clearing history")
+        messages = chat_log.content
+        last_user_index = None
+        for i in reversed(range(len(messages))):
+            if isinstance(messages[i], conversation.UserContent):
+                last_user_index = i
+                break
+        if last_user_index is not None:
+            del messages[1:last_user_index]
 
     def _get_enabled_skills(self) -> list[Skill]:
         enabled_names = self.subentry.data.get(CONF_SKILLS, []) or []

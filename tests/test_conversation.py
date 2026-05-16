@@ -143,6 +143,108 @@ async def test_both_models_fail_returns_error(
     assert "problem talking to the LLM" in result.response.speech["plain"]["speech"]
 
 
+@pytest.mark.usefixtures("mock_validate_connection", "mock_provider_stream_non_retryable")
+async def test_non_retryable_error_skips_fallback(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test fallback is NOT used for non-retryable errors (e.g., 400/401)."""
+    subentry = next(iter(mock_config_entry.subentries.values()))
+    hass.config_entries.async_update_subentry(
+        mock_config_entry,
+        subentry,
+        data={**subentry.data, "fallback_model": "gpt-4o-mini"},
+    )
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await conversation.async_converse(
+        hass,
+        "hello",
+        None,
+        Context(),
+        agent_id=mock_config_entry.entry_id,
+    )
+
+    # Should error immediately without attempting fallback
+    assert result.response.response_type == intent.IntentResponseType.ERROR
+    assert "problem talking to the LLM" in result.response.speech["plain"]["speech"]
+
+
+@pytest.mark.usefixtures("mock_validate_connection", "mock_provider_stream_with_fallback")
+async def test_fallback_event_includes_outcome(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test EVENT_CONVERSATION_FINISHED includes outcome and usage on fallback."""
+    from custom_components.universal_llm_conversation.const import EVENT_CONVERSATION_FINISHED
+
+    subentry = next(iter(mock_config_entry.subentries.values()))
+    hass.config_entries.async_update_subentry(
+        mock_config_entry,
+        subentry,
+        data={**subentry.data, "fallback_model": "gpt-4o-mini"},
+    )
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    events = []
+
+    def event_listener(event):
+        events.append(event)
+
+    hass.bus.async_listen(EVENT_CONVERSATION_FINISHED, event_listener)
+
+    result = await conversation.async_converse(
+        hass,
+        "hello",
+        None,
+        Context(),
+        agent_id=mock_config_entry.entry_id,
+    )
+
+    assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
+    assert len(events) == 1
+    assert events[0].data["outcome"] == "fallback_used"
+    assert events[0].data["error_type"] == "ConnectionError"
+
+
+@pytest.mark.usefixtures("mock_validate_connection", "mock_provider_stream_with_usage")
+async def test_conversation_event_includes_usage(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test EVENT_CONVERSATION_FINISHED includes token usage."""
+    from custom_components.universal_llm_conversation.const import EVENT_CONVERSATION_FINISHED
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    events = []
+
+    def event_listener(event):
+        events.append(event)
+
+    hass.bus.async_listen(EVENT_CONVERSATION_FINISHED, event_listener)
+
+    result = await conversation.async_converse(
+        hass,
+        "hello",
+        None,
+        Context(),
+        agent_id=mock_config_entry.entry_id,
+    )
+
+    assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
+    assert len(events) == 1
+    assert events[0].data["outcome"] == "success"
+    assert events[0].data["usage"]["prompt_tokens"] == 10
+    assert events[0].data["usage"]["completion_tokens"] == 5
+    assert events[0].data["usage"]["total_tokens"] == 15
+
+
 @pytest.mark.usefixtures("mock_validate_connection")
 async def test_agent_skills_empty_by_default(
     hass: HomeAssistant,
@@ -208,3 +310,43 @@ async def test_async_added_to_hass_absolute_path(
     assert agent.skill_manager is not None
     # The skills_dir should be based on DEFAULT_WORKING_DIRECTORY
     assert "skills" in str(agent.skill_manager.user_skills_dir)
+
+
+def test_is_retryable_error_classification() -> None:
+    """Test _is_retryable_error correctly classifies exceptions."""
+    from custom_components.universal_llm_conversation.conversation import _is_retryable_error
+    import httpx
+
+    # Built-in retryable
+    assert _is_retryable_error(TimeoutError("timed out")) is True
+    assert _is_retryable_error(ConnectionError("reset")) is True
+
+    # Non-retryable built-in
+    assert _is_retryable_error(ValueError("bad")) is False
+    assert _is_retryable_error(RuntimeError("oops")) is False
+
+    # OpenAI SDK errors
+    from openai import APIStatusError, APITimeoutError, APIConnectionError
+
+    req = httpx.Request("GET", "http://test")
+    assert _is_retryable_error(APITimeoutError(req)) is True
+    assert _is_retryable_error(APIConnectionError(request=req)) is True
+
+    # 429 -> retryable
+    resp429 = httpx.Response(status_code=429, request=req)
+    assert _is_retryable_error(APIStatusError("rate limit", response=resp429, body=None)) is True
+
+    # 502/503/504 -> retryable
+    resp503 = httpx.Response(status_code=503, request=req)
+    assert _is_retryable_error(APIStatusError("unavailable", response=resp503, body=None)) is True
+
+    # 400/401/403 -> NOT retryable
+    resp401 = httpx.Response(status_code=401, request=req)
+    assert _is_retryable_error(APIStatusError("auth", response=resp401, body=None)) is False
+
+    resp400 = httpx.Response(status_code=400, request=req)
+    assert _is_retryable_error(APIStatusError("bad req", response=resp400, body=None)) is False
+
+    # ImportError branch when openai SDK is not available
+    with patch("builtins.__import__", side_effect=ImportError("no openai")):
+        assert _is_retryable_error(ValueError("whatever")) is False

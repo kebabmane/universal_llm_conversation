@@ -323,7 +323,6 @@ async def test_conversation_subentry_flow(
             "max_function_calls_per_conv": 5,
             "functions": "[]",
             "context_threshold": 40000,
-            "context_truncate_strategy": "clear",
             "advanced_options": False,
         },
     )
@@ -358,7 +357,6 @@ async def test_conversation_subentry_advanced_options(
             "max_function_calls_per_conv": 5,
             "functions": "[]",
             "context_threshold": 40000,
-            "context_truncate_strategy": "clear",
             "advanced_options": True,
         },
     )
@@ -384,33 +382,7 @@ async def test_conversation_subentry_advanced_options(
     assert result3["data"]["fallback_model"] == "gpt-4o-mini"
 
 
-@pytest.mark.usefixtures("mock_validate_connection")
-async def test_ai_task_subentry_flow(
-    hass: HomeAssistant,
-    mock_config_entry: object,
-) -> None:
-    """Test creating an AI task subentry."""
-    await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
 
-    result = await hass.config_entries.subentries.async_init(
-        (mock_config_entry.entry_id, "ai_task_data"),
-        context={"source": config_entries.SOURCE_USER},
-    )
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "init"
-
-    result2 = await hass.config_entries.subentries.async_configure(
-        result["flow_id"],
-        {
-            "name": "My AI Task",
-            "chat_model": "gpt-4o-mini",
-            "max_tokens": 500,
-            "advanced_options": False,
-        },
-    )
-    assert result2["type"] is FlowResultType.CREATE_ENTRY
-    assert result2["title"] == "My AI Task"
 
 
 @pytest.mark.usefixtures("mock_validate_connection")

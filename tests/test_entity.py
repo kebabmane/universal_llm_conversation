@@ -278,6 +278,42 @@ class TestEntityHelpers:
         assert chat_log.content[1].content == "bye"
 
     @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_raises_on_length(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test that finish_reason=='length' raises TokenLengthExceededError."""
+        from custom_components.universal_llm_conversation.exceptions import TokenLengthExceededError
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"content": "truncated"}
+            yield {"finish_reason": "length"}
+
+        with pytest.raises(TokenLengthExceededError):
+            async for _ in agent._transform_stream(
+                MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            ):
+                pass
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_background_execution_schedules_task(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test that delay arguments trigger background task creation."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        with patch.object(agent.entry, "async_create_task") as mock_create_task:
+            result = await agent._execute_function_tool(
+                {"spec": {"name": "test"}, "function": {"type": "native", "name": "test"}},
+                llm.ToolInput(id="call_1", tool_name="test", tool_args={"delay": 5}),
+                None,
+                [],
+            )
+        assert result.tool_result == {"result": "Scheduled"}
+        mock_create_task.assert_called_once()
+
+    @pytest.mark.usefixtures("mock_validate_connection")
     async def test_get_provider_resolves_base_url_from_preset(self, hass: HomeAssistant) -> None:
         """Test that _get_provider() resolves base_url from preset at conversation runtime."""
         from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -366,6 +402,15 @@ class TestEntityHelpers:
         assert call_kwargs["provider_key"] == "openai_compatible"
 
     @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_should_run_in_background(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+        assert agent._should_run_in_background({"delay": 5}) is True
+        assert agent._should_run_in_background({"foo": "bar"}) is False
+        assert agent._should_run_in_background(None) is False
+
+    @pytest.mark.usefixtures("mock_validate_connection")
     async def test_get_function_tools_error_handling(self, hass: HomeAssistant, mock_config_entry: object) -> None:
         await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
@@ -380,5 +425,58 @@ class TestEntityHelpers:
         with patch("yaml.safe_load", side_effect=RuntimeError("unexpected")):
             with pytest.raises(FunctionLoadFailed):
                 agent._get_function_tools()
+
+    def test_format_structured_output(self) -> None:
+        """Test structured output format conversion."""
+        from custom_components.universal_llm_conversation.entity import _format_structured_output
+        import voluptuous as vol
+
+        schema = vol.Schema({vol.Required("name"): str})
+        result = _format_structured_output(schema, None)
+        assert result["type"] == "object"
+        assert "properties" in result
+        assert "name" in result["properties"]
+
+    def test_truncate_message_history_no_user_content(self) -> None:
+        """Test truncate when there is no user content after system."""
+        from custom_components.universal_llm_conversation.entity import UniversalLLMBaseEntity
+        chat_log = MagicMock()
+        chat_log.content = [
+            conversation.SystemContent(content="sys"),
+            conversation.AssistantContent(agent_id="a", content="hello"),
+        ]
+        # Should not crash when no user content exists
+        import asyncio
+        asyncio.run(UniversalLLMBaseEntity._truncate_message_history(MagicMock(), chat_log))
+        assert len(chat_log.content) == 2
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_accumulates_usage(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test _transform_stream populates usage_accumulator."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "hi"}
+            yield {
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 4,
+                    "total_tokens": 12,
+                }
+            }
+            yield {"finish_reason": "stop"}
+
+        usage_accumulator = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        async for _ in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator=usage_accumulator
+        ):
+            pass
+
+        assert usage_accumulator["prompt_tokens"] == 8
+        assert usage_accumulator["completion_tokens"] == 4
+        assert usage_accumulator["total_tokens"] == 12
 
 

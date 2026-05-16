@@ -151,11 +151,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 - **166 tests, 94% coverage** — Added test for `_get_provider()` provider key resolution from preset at runtime
 
+## [0.1.14] - 2026-05-16
+
+### Removed
+- **AI Task subentries** — Complete ghost feature removed. The UI could create "AI Task" subentries but `PLATFORMS = [CONVERSATION]` meant they were silently skipped with no runtime entity. Removed `UniversalLLMAITaskSubentryFlowHandler`, `DEFAULT_AI_TASK_NAME`, `DEFAULT_AI_TASK_OPTIONS`, and the `ai_task_data` subentry registration (~100 lines of dead code)
+- **Dead constants** — `EVENT_AUTOMATION_REGISTERED` (never fired), `SERVICE_QUERY_IMAGE` + `CONF_PAYLOAD_TEMPLATE` (no service exists), `DEFAULT_ALLOWED_DIRS` (never referenced), duplicate `CONF_CHAT_MODEL` definition
+- **Dead exception** — `ParseArgumentsFailed` (defined and imported, never raised or caught)
+- **Dead code** — `_get_enabled_skills` in `entity.py` (shadowed by identical method in `conversation.py`), `tests/common.py` (imported but never used), `mock_exposed_entities` fixture (never consumed)
+- **Unused imports** across `conversation.py`, `entity.py`, `__init__.py`, `helpers.py`, `functions.py`, `providers/openai_compatible.py`
+
+### Changed
+- **Context truncation strategy** — Removed the dropdown offering only "Clear All Messages". The strategy is now hard-coded to "clear" until a second strategy is actually implemented. Removes UI noise and schema complexity
+- **advanced_options no longer persisted** — The toggle was stored in subentry data but never read by runtime. Now used only for flow control and discarded before entry creation
+- **Tightened fallback error catch** — Removed blanket `Exception` from `_FALLBACK_ELIGIBLE_ERRORS`. Now only `TimeoutError` and `ConnectionError` trigger fallback retries, preventing real bugs from being masked
+- **Code style consistency** — `validate_input()` now uses the same `data.get(CONF_BASE_URL) or _get_base_url_from_preset(data)` pattern as other files
+
+### Testing
+- **172 tests, 97% coverage** — Added tests for structured output formatting, token-length exceeded error, background execution scheduling, and provider validation error branches (401→invalid_auth, timeout, 500→cannot_connect)
+- **Provider test coverage: 100%** — All validation error paths now tested
+
+## [0.1.15] - 2026-05-16
+
+### Added
+- **Smarter fallback with error classification** — `_is_retryable_error()` classifies OpenAI SDK exceptions by HTTP status code:
+  - **Retryable**: `TimeoutError`, `ConnectionError`, `APITimeoutError`, `APIConnectionError`, `429` (rate limit), `5xx` (server errors)
+  - **Not retryable**: `400` (bad request), `401` (unauthorized), `403` (forbidden) — these now fail fast instead of burning the fallback attempt
+  - Future non-OpenAI providers can extend this without touching the fallback logic
+- **Token usage tracking** — `provider.stream_chat()` yields usage chunks that are now accumulated across tool iterations and surfaced in `EVENT_CONVERSATION_FINISHED`:
+  - `usage.prompt_tokens` — input tokens consumed
+  - `usage.completion_tokens` — output tokens generated
+  - `usage.total_tokens` — combined total
+- **Conversation outcome analytics** — `EVENT_CONVERSATION_FINISHED` now includes:
+  - `outcome`: `"success"`, `"fallback_used"`, or `"failed"`
+  - `error_type`: exception class name (e.g., `APIStatusError`, `ConnectionError`, `TokenLengthExceededError`) — `None` when successful
+  - `usage`: token totals (omitted when both primary and fallback fail)
+
+### Changed
+- **`_async_handle_chat_log()` now returns `dict[str, int]`** with accumulated token usage instead of `None`
+- **`_transform_stream()` accumulates usage** via a mutable `usage_accumulator` dict passed from the caller
+
+### Testing
+- **177 tests, 97% coverage** — Added:
+  - Unit tests for `_is_retryable_error()` covering built-in exceptions, OpenAI SDK exceptions (429, 503, 401, 400), and the `ImportError` safety branch
+  - Integration test verifying non-retryable errors (`ValueError`) skip fallback even when a fallback model is configured
+  - Integration test verifying `EVENT_CONVERSATION_FINISHED` payload includes `outcome`, `error_type`, and `usage` on success
+  - Integration test verifying `outcome="fallback_used"` and `error_type="ConnectionError"` when fallback succeeds after primary failure
+  - Entity-level test for `_transform_stream` usage accumulator
+
 ## [Unreleased]
 
 - Native Anthropic provider
 - Native Google Gemini provider
-- Per-provider error classification for smarter fallback triggering (e.g., only retry on 429/5xx, not 401/400)
-- Token usage tracking and cost estimation
 - Streaming support for non-OpenAI-compatible providers
 - Structured output / JSON schema validation

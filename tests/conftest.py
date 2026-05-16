@@ -66,12 +66,6 @@ def mock_config_entry(hass: HomeAssistant) -> MockConfigEntry:
                 title="Test Conversation",
                 unique_id=None,
             ),
-            ConfigSubentryData(
-                data={"chat_model": "gpt-4o-mini", "max_tokens": 500},
-                subentry_type="ai_task_data",
-                title="Test AI Task",
-                unique_id=None,
-            ),
         ],
     )
     entry.add_to_hass(hass)
@@ -173,15 +167,39 @@ def mock_provider_stream_always_fail() -> Generator[AsyncMock]:
 
 
 @pytest.fixture
-def mock_exposed_entities(hass: HomeAssistant) -> None:
-    """Set up fake exposed entities in hass.states."""
-    hass.states.async_set("light.test", "off", {"friendly_name": "Test Light"})
-    hass.states.async_set("switch.test", "on", {"friendly_name": "Test Switch"})
-    hass.states.async_set("sensor.test", "42", {"friendly_name": "Test Sensor"})
+def mock_provider_stream_non_retryable() -> Generator[AsyncMock]:
+    """Mock provider stream_chat to raise a non-retryable error."""
 
-    # Mock async_should_expose to return True for all entities
+    async def fake_stream(*args: object, **kwargs: object) -> AsyncGenerator[dict[str, object], None]:
+        raise ValueError("Bad request parameter")
+
     with patch(
-        "homeassistant.components.homeassistant.exposed_entities.async_should_expose",
-        return_value=True,
-    ):
-        yield
+        "custom_components.universal_llm_conversation.providers.openai_compatible.OpenAICompatibleProvider.stream_chat",
+        side_effect=fake_stream,
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_provider_stream_with_usage() -> Generator[AsyncMock]:
+    """Mock provider stream_chat to yield a response with usage metadata."""
+
+    async def fake_stream(*args: object, **kwargs: object) -> AsyncGenerator[dict[str, object], None]:
+        yield {"role": "assistant"}
+        yield {"content": "Hello with usage"}
+        yield {
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            }
+        }
+        yield {"finish_reason": "stop"}
+
+    with patch(
+        "custom_components.universal_llm_conversation.providers.openai_compatible.OpenAICompatibleProvider.stream_chat",
+        side_effect=fake_stream,
+    ) as mock:
+        yield mock
+
+

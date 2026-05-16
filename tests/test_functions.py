@@ -20,7 +20,6 @@ from custom_components.universal_llm_conversation.functions import (
     TemplateFunction,
     get_function,
 )
-from tests.common import get_function_tool_from_yaml
 
 
 class TestGetFunction:
