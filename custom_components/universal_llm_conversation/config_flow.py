@@ -285,10 +285,16 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         schema: dict[Any, Any] = {}
         models: list[str] = []
 
+        model_list_restricted = False
         if supports_model_list and base_url and api_key:
-            models = await async_fetch_models(
-                self.hass, api_key=api_key, base_url=base_url, timeout=10.0
-            )
+            try:
+                models = await async_fetch_models(
+                    self.hass, api_key=api_key, base_url=base_url, timeout=10.0
+                )
+            except HomeAssistantError as err:
+                if str(err) == "model_list_restricted":
+                    model_list_restricted = True
+                models = []
 
         if models:
             # Show dropdown with fetched models + custom option
@@ -315,7 +321,10 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
 
         errors = {}
         if supports_model_list and not models:
-            errors["base"] = "model_fetch_failed"
+            if model_list_restricted:
+                errors["base"] = "model_list_restricted"
+            else:
+                errors["base"] = "model_fetch_failed"
 
         return self.async_show_form(
             step_id="model",

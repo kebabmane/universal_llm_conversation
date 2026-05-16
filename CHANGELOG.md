@@ -94,6 +94,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **156 tests, 93% coverage** — Added integration tests for `invalid_auth` and `timeout` error paths in config flow
 - Updated provider unit tests to match new exception-based validation behavior
 
+## [0.1.9] - 2026-05-16
+
+### Fixed
+- **Fire Pass / restricted API key tiers** — `validate_connection()` now treats HTTP 403 on `/v1/models` as "key valid but endpoint restricted" instead of a fatal error. Setup proceeds and the user enters a model manually
+- **`model_list_restricted` error message** — When the provider's API tier blocks model enumeration, the UI shows: *"This API key tier does not support automatic model listing. Enter a model name manually."*
+- **`async_fetch_models()` raises on 403** — Detects 403/forbidden responses and raises `HomeAssistantError("model_list_restricted")` so the config flow can show the appropriate message
+
+### Testing
+- **158 tests** — Added tests for 403 handling in `validate_connection()`, `async_fetch_models()`, and config flow model step
+
 ## [Unreleased]
 
 - Native Anthropic provider

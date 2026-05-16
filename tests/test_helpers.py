@@ -214,6 +214,24 @@ class TestAsyncFetchModels:
 
         assert result == []
 
+    async def test_fetch_raises_restricted_on_403(self) -> None:
+        """Test that 403 raises HomeAssistantError with model_list_restricted."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        hass = MagicMock()
+
+        with patch(
+            "custom_components.universal_llm_conversation.helpers.AsyncOpenAI"
+        ) as mock_client:
+            mock_client.return_value.models.list = MagicMock(
+                side_effect=Exception("Error code: 403 - Forbidden")
+            )
+
+            with pytest.raises(HomeAssistantError) as exc_info:
+                await async_fetch_models(hass, "key", "http://localhost:1234/v1")
+
+        assert str(exc_info.value) == "model_list_restricted"
+
 
 class TestSanitizeEdgeCases:
     """Test sanitize_for_speech edge cases."""

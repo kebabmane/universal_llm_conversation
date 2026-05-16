@@ -34,6 +34,7 @@
       "invalid_auth": "Invalid API key. Check your key is correct.",
       "timeout": "Connection timed out. Check your network or increase the timeout in options.",
       "model_fetch_failed": "Could not fetch model list. You can still enter a model name manually.",
+      "model_list_restricted": "This API key tier does not support automatic model listing. Enter a model name manually.",
       "unknown": "Unexpected error occurred."
     }
   },

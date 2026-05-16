@@ -181,6 +181,37 @@ class TestValidateConnection:
         with pytest.raises(HomeAssistantError):
             await provider.validate_connection()
 
+    async def test_validate_connection_403_returns_true(self) -> None:
+        """Test that 403 on model listing is treated as valid (restricted tier)."""
+        from openai import APIStatusError
+
+        hass = MagicMock(spec=HomeAssistant)
+        hass.data = {}
+        with patch(
+            "custom_components.universal_llm_conversation.providers.openai_compatible.get_async_client",
+            side_effect=_mocked_get_async_client,
+        ):
+            provider = OpenAICompatibleProvider(
+                hass=hass,
+                api_key="key",
+                base_url=None,
+                api_version=None,
+                organization=None,
+                model="gpt-4o",
+                capabilities=OPENAI_COMPATIBLE_CAPABILITIES,
+                timeout=60.0,
+            )
+
+        err = APIStatusError(
+            message="Fire Pass API keys are not authorized for this route.",
+            response=MagicMock(status_code=403),
+            body={"error": {"message": "not authorized"}},
+        )
+        provider._client.models.list = MagicMock(side_effect=err)
+
+        result = await provider.validate_connection()
+        assert result is True
+
 
 class TestStreamChat:
     """Direct tests for stream_chat yielding correct chunks."""

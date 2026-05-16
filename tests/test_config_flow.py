@@ -400,3 +400,46 @@ async def test_model_fetch_failure_shows_error(
     assert result3["type"] is FlowResultType.FORM
     assert result3["step_id"] == "model"
     assert result3["errors"] == {"base": "model_fetch_failed"}
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_model_step_shows_restricted_on_403(
+    hass: HomeAssistant,
+) -> None:
+    """Test model step shows model_list_restricted when API tier blocks /v1/models."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Firepass LLM",
+            "provider_preset": "fireworks",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    with patch(
+        "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
+        side_effect=HomeAssistantError("model_list_restricted"),
+    ):
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
+            {
+                "api_key": "fp-test-key",
+                "skip_authentication": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
+    assert result3["errors"] == {"base": "model_list_restricted"}

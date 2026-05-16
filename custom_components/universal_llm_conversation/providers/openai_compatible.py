@@ -79,6 +79,12 @@ class OpenAICompatibleProvider(BaseProvider):
             _LOGGER.error("Provider connection error: %s", err)
             raise HomeAssistantError("cannot_connect")
         except APIStatusError as err:
+            if err.status_code == 403:
+                _LOGGER.warning(
+                    "Provider returned 403 on /v1/models — API key tier may restrict "
+                    "model listing. Proceeding with setup; enter model manually."
+                )
+                return True
             _LOGGER.error("Provider returned HTTP %s: %s", err.status_code, err.message)
             raise HomeAssistantError("cannot_connect")
         except Exception as err:

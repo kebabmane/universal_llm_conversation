@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.components import conversation
 from homeassistant.components.homeassistant.exposed_entities import async_should_expose
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.template import Template
 
@@ -177,5 +178,12 @@ async def async_fetch_models(
             models.append(model_id)
         return sorted(models)
     except Exception as err:
+        error_str = str(err).lower()
+        if "403" in error_str or "forbidden" in error_str:
+            _LOGGER.warning(
+                "Provider restricts /v1/models for this API key tier. "
+                "Enter model name manually."
+            )
+            raise HomeAssistantError("model_list_restricted") from err
         _LOGGER.error("Failed to fetch models from %s: %s", base_url, err)
         return []
