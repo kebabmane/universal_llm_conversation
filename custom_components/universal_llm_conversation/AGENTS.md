@@ -59,5 +59,32 @@ Default `hide_thinking=True`. Kimi K2.6 `reasoning_content` is captured but not 
 6. Verify voice output has no leaked reasoning or tool syntax.
 7. Set fallback model and block primary endpoint to test fallback.
 
+## Release Process
+
+**Critical: HACS discovers GitHub Releases, not git tags.** Pushing a git tag alone will NOT make the update visible in Home Assistant.
+
+### Step-by-step release checklist
+
+1. **Update `manifest.json`** — Bump the `"version"` field.
+2. **Update `CHANGELOG.md`** — Add a new section with the version number and date.
+3. **Run tests** — `venv/bin/python -m pytest tests/ --timeout=30 -q` must pass.
+4. **Commit** — `git add -A && git commit -m "vX.Y.Z: Description"`.
+5. **Push** — `git push origin main`.
+6. **Create git tag** — `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin --tags`.
+7. **Create GitHub Release** — Use `gh` CLI (REQUIRED for HACS):
+   ```bash
+   gh release create vX.Y.Z \
+     --title "vX.Y.Z — Short description" \
+     --notes "Release notes from CHANGELOG..." \
+     --latest
+   ```
+   Or create it manually at https://github.com/kebabmane/universal_llm_conversation/releases/new.
+8. **Verify in HACS** — In Home Assistant, go to **HACS → Integrations → Universal LLM Conversation → Update information**. The new version should appear.
+
+### Important notes
+- Never skip step 7. HACS polls GitHub Releases API, not git tags.
+- The release title and notes are what users see in HACS.
+- Use `--latest` flag so GitHub marks it as the latest release.
+
 ## Migration
 This is a clean break — no migration from `extended_openai_conversation`. Users must re-create integrations and copy their function YAML manually.
