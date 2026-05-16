@@ -279,8 +279,15 @@ class TestResolveCapabilities:
     def test_openai_compatible_by_default(self) -> None:
         from custom_components.universal_llm_conversation.providers import OPENAI_COMPATIBLE_CAPABILITIES
 
-        caps = _resolve_capabilities("gpt-4o")
+        caps = _resolve_capabilities("gpt-3.5-turbo")
         assert caps == OPENAI_COMPATIBLE_CAPABILITIES
+
+    def test_gpt_4o_override(self) -> None:
+        from custom_components.universal_llm_conversation.providers import MODEL_CAPABILITY_OVERRIDES
+
+        caps = _resolve_capabilities("gpt-4o")
+        assert caps == MODEL_CAPABILITY_OVERRIDES["gpt-4o"]
+        assert caps.supports_vision is True
 
     def test_kimi_override(self) -> None:
         from custom_components.universal_llm_conversation.providers import MODEL_CAPABILITY_OVERRIDES

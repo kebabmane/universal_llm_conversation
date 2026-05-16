@@ -103,6 +103,28 @@ class OpenAICompatibleProvider(BaseProvider):
             "stream_options": {"include_usage": True},
         }
 
+        # Convert attachment messages to OpenAI multimodal format
+        for msg in messages:
+            if "attachments" in msg:
+                content_list: list[dict[str, Any]] = [
+                    {"type": "text", "text": msg.pop("content", "") or ""}
+                ]
+                for att in msg.pop("attachments", []):
+                    if att["mime_type"] == "application/pdf":
+                        _LOGGER.warning(
+                            "PDF attachments are not supported by the OpenAI Chat Completions API "
+                            "used by %s. Skipping PDF.",
+                            self.model,
+                        )
+                        continue
+                    content_list.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{att['mime_type']};base64,{att['data_base64']}"
+                        },
+                    })
+                msg["content"] = content_list
+
         # Merge options that have already been filtered by capabilities
         for key in ("temperature", "top_p", "max_tokens", "max_completion_tokens"):
             if key in options:

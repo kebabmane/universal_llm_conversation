@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import logging
 import re
@@ -48,6 +50,30 @@ from .const import (
 _SENTENCE_BOUNDARY_RE = re.compile(
     r'(?<=[.!?…])(?=\s|$)|(?<=。)(?=.)|(?<=？)(?=.)|(?<=！)(?=.)|\n\n|\n'
 )
+
+
+def _resize_image_if_needed(data: bytes, mime_type: str) -> bytes:
+    """Resize image if it exceeds API-friendly dimensions."""
+    if not mime_type.startswith("image/"):
+        return data  # PDFs pass through unchanged
+    try:
+        from PIL import Image
+    except ImportError:
+        return data
+    try:
+        img = Image.open(io.BytesIO(data))
+        max_dim = 1568  # OpenAI's recommended max for vision
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            new_size = (int(img.width * ratio), int(img.height * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format=img.format or "JPEG")
+        return buf.getvalue()
+    except Exception:
+        return data
+
+
 from .exceptions import FunctionNotFound, TokenLengthExceededError
 from .functions import get_function
 from .helpers import _get_base_url_from_preset, get_exposed_entities, get_provider, shorten_tool_call_id
@@ -109,7 +135,18 @@ def _convert_content_to_param(
         if content.role == "system":
             messages.append({"role": "system", "content": content.content})
         elif content.role == "user":
-            messages.append({"role": "user", "content": content.content})
+            msg: dict[str, Any] = {"role": "user", "content": content.content}
+            attachments = getattr(content, "attachments", None)
+            if attachments:
+                msg["attachments"] = []
+                for att in attachments:
+                    data = att.path.read_bytes()
+                    data = _resize_image_if_needed(data, att.mime_type)
+                    msg["attachments"].append({
+                        "mime_type": att.mime_type,
+                        "data_base64": base64.b64encode(data).decode(),
+                    })
+            messages.append(msg)
         elif content.role == "assistant":
             msg: dict[str, Any] = {"role": "assistant"}
             if content.content:
@@ -218,6 +255,14 @@ class UniversalLLMBaseEntity(Entity):
             chat_log.content,
             shorten_tool_call_id if do_shorten_tool_call_id else None,
         )
+
+        # Validate vision capability if attachments are present
+        if any("attachments" in m for m in messages) and not provider.capabilities.supports_vision:
+            from homeassistant.exceptions import HomeAssistantError
+            raise HomeAssistantError(
+                f"Model {provider.model} does not support image or PDF attachments. "
+                "Configure a vision-capable model or remove the attachment."
+            )
 
         # Build tools
         tools: list[dict[str, Any]] = []

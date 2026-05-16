@@ -808,3 +808,49 @@ class TestAnthropicStreamChatEdgeCases:
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert call_kwargs["system"] == "You are helpful"
         assert call_kwargs["max_tokens"] == 512
+
+
+class TestAnthropicAttachmentConversion:
+    """Test _convert_message with image and PDF attachments."""
+
+    def test_convert_message_with_image(self) -> None:
+        import base64
+        from custom_components.universal_llm_conversation.providers.anthropic import AnthropicProvider
+
+        msg = {
+            "role": "user",
+            "content": "describe this",
+            "attachments": [
+                {"mime_type": "image/jpeg", "data_base64": base64.b64encode(b"fake_img").decode()}
+            ],
+        }
+        result = AnthropicProvider._convert_message(msg)
+        assert result["role"] == "user"
+        assert len(result["content"]) == 2
+        assert result["content"][0] == {"type": "text", "text": "describe this"}
+        assert result["content"][1]["type"] == "image"
+        assert result["content"][1]["source"]["type"] == "base64"
+        assert result["content"][1]["source"]["media_type"] == "image/jpeg"
+        assert result["content"][1]["source"]["data"] == base64.b64encode(b"fake_img").decode()
+
+    def test_convert_message_with_pdf(self) -> None:
+        import base64
+        from custom_components.universal_llm_conversation.providers.anthropic import AnthropicProvider
+
+        msg = {
+            "role": "user",
+            "content": "summarize this",
+            "attachments": [
+                {"mime_type": "application/pdf", "data_base64": base64.b64encode(b"fake_pdf").decode()}
+            ],
+        }
+        result = AnthropicProvider._convert_message(msg)
+        assert result["content"][1]["type"] == "document"
+        assert result["content"][1]["source"]["media_type"] == "application/pdf"
+
+    def test_convert_message_without_attachments(self) -> None:
+        from custom_components.universal_llm_conversation.providers.anthropic import AnthropicProvider
+
+        msg = {"role": "user", "content": "hello"}
+        result = AnthropicProvider._convert_message(msg)
+        assert result == {"role": "user", "content": "hello"}

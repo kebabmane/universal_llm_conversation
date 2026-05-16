@@ -593,6 +593,55 @@ class TestStreamChat:
             async for _ in provider.stream_chat([], None, {}):
                 pass
 
+    async def test_stream_chat_with_image_attachment(self, provider: OpenAICompatibleProvider) -> None:
+        """Test image attachments are converted to OpenAI multimodal format."""
+        import base64
+
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=self._async_iter([await self._make_chunk(finish_reason="stop")])
+        )
+
+        messages = [
+            {"role": "user", "content": "describe this", "attachments": [
+                {"mime_type": "image/jpeg", "data_base64": base64.b64encode(b"fake_img").decode()}
+            ]}
+        ]
+
+        async for _ in provider.stream_chat(messages, None, {}):
+            pass
+
+        call_args = provider._client.chat.completions.create.call_args.kwargs
+        sent_messages = call_args["messages"]
+        assert sent_messages[0]["role"] == "user"
+        content_list = sent_messages[0]["content"]
+        assert len(content_list) == 2
+        assert content_list[0] == {"type": "text", "text": "describe this"}
+        assert content_list[1]["type"] == "image_url"
+        assert "data:image/jpeg;base64," in content_list[1]["image_url"]["url"]
+
+    async def test_stream_chat_skips_pdf_attachment(self, provider: OpenAICompatibleProvider) -> None:
+        """Test PDF attachments are skipped with a warning for OpenAI Chat Completions."""
+        import base64
+
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=self._async_iter([await self._make_chunk(finish_reason="stop")])
+        )
+
+        messages = [
+            {"role": "user", "content": "summarize this", "attachments": [
+                {"mime_type": "application/pdf", "data_base64": base64.b64encode(b"fake_pdf").decode()}
+            ]}
+        ]
+
+        async for _ in provider.stream_chat(messages, None, {}):
+            pass
+
+        call_args = provider._client.chat.completions.create.call_args.kwargs
+        sent_messages = call_args["messages"]
+        content_list = sent_messages[0]["content"]
+        assert len(content_list) == 1  # PDF skipped, only text remains
+        assert content_list[0] == {"type": "text", "text": "summarize this"}
+
     @staticmethod
     async def _async_iter(items: list[MagicMock]) -> AsyncGenerator[MagicMock, None]:
         for item in items:

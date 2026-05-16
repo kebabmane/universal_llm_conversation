@@ -194,10 +194,17 @@ class GeminiProvider(BaseProvider):
         """Convert an OpenAI-style message to Gemini Content format."""
         role = msg.get("role")
         if role == "user":
-            return types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=str(msg.get("content", "")))],
-            )
+            import base64
+
+            parts: list[Any] = [types.Part.from_text(text=str(msg.get("content", "")))]
+            for att in msg.get("attachments", []):
+                parts.append(
+                    types.Part.from_bytes(
+                        data=base64.b64decode(att["data_base64"]),
+                        mime_type=att["mime_type"],
+                    )
+                )
+            return types.Content(role="user", parts=parts)
         if role == "assistant":
             parts: list[Any] = []
             content = msg.get("content")

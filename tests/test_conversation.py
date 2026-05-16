@@ -357,6 +357,48 @@ def test_is_retryable_error_classification() -> None:
 
 
 @pytest.mark.usefixtures("mock_validate_connection")
+async def test_vision_disabled_raises_error(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test HomeAssistantError when non-vision model receives attachments."""
+    from homeassistant.exceptions import HomeAssistantError
+    from unittest.mock import MagicMock, patch
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+    # Mock provider without vision support
+    mock_provider = MagicMock()
+    mock_provider.model = "non-vision-model"
+    mock_provider.capabilities.supports_vision = False
+    mock_provider.filter_params = lambda p: p
+    mock_provider.stream_chat = MagicMock(return_value=[])
+
+    # Mock chat_log with attachment
+    chat_log = MagicMock()
+    att = MagicMock()
+    att.mime_type = "image/jpeg"
+    att.path = MagicMock()
+    att.path.read_bytes = MagicMock(return_value=b"fake")
+    chat_log.content = [
+        conversation.SystemContent(content="sys"),
+        conversation.UserContent(content="hi", attachments=[att]),
+    ]
+
+    with patch.object(agent, "_get_provider", return_value=mock_provider):
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await agent._async_handle_chat_log(
+                chat_log,
+                function_tools=[],
+                exposed_entities=[],
+            )
+    assert "does not support image or PDF attachments" in str(exc_info.value)
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
 async def test_non_conversation_subentry_skipped(
     hass: HomeAssistant,
 ) -> None:

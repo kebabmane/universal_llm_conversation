@@ -209,7 +209,33 @@ class AnthropicProvider(BaseProvider):
         """Convert an OpenAI-style message to Anthropic format."""
         role = msg.get("role")
         if role == "user":
-            return {"role": "user", "content": str(msg.get("content", ""))}
+            text = str(msg.get("content", ""))
+            attachments = msg.get("attachments", [])
+            if attachments:
+                content_blocks: list[dict[str, Any]] = []
+                if text:
+                    content_blocks.append({"type": "text", "text": text})
+                for att in attachments:
+                    if att["mime_type"] == "application/pdf":
+                        content_blocks.append({
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": att["data_base64"],
+                            },
+                        })
+                    else:
+                        content_blocks.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": att["mime_type"],
+                                "data": att["data_base64"],
+                            },
+                        })
+                return {"role": "user", "content": content_blocks}
+            return {"role": "user", "content": text}
         if role == "assistant":
             result: dict[str, Any] = {"role": "assistant"}
             content = msg.get("content")

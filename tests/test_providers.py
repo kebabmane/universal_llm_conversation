@@ -130,3 +130,28 @@ class TestKimiOverrides:
         caps = MODEL_CAPABILITY_OVERRIDES["claude-"]
         assert caps.supports_thinking_content is True
         assert caps.supports_strict_schemas is False
+
+    def test_anthropic_capabilities_support_vision(self) -> None:
+        assert ANTHROPIC_CAPABILITIES.supports_vision is True
+
+    def test_gemini_capabilities_support_vision(self) -> None:
+        assert GEMINI_CAPABILITIES.supports_vision is True
+
+    def test_openai_compatible_capabilities_no_vision_by_default(self) -> None:
+        assert OPENAI_COMPATIBLE_CAPABILITIES.supports_vision is False
+
+    def test_kimi_k2_6_supports_vision(self) -> None:
+        caps = MODEL_CAPABILITY_OVERRIDES["kimi-k2.6"]
+        assert caps.supports_vision is True
+
+    def test_kimi_k2_5_supports_vision(self) -> None:
+        caps = MODEL_CAPABILITY_OVERRIDES["kimi-k2.5"]
+        assert caps.supports_vision is True
+
+    def test_gpt_4o_supports_vision(self) -> None:
+        caps = MODEL_CAPABILITY_OVERRIDES["gpt-4o"]
+        assert caps.supports_vision is True
+
+    def test_gpt_4o_mini_supports_vision(self) -> None:
+        caps = MODEL_CAPABILITY_OVERRIDES["gpt-4o-mini"]
+        assert caps.supports_vision is True

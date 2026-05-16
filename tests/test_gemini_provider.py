@@ -812,3 +812,59 @@ class TestGeminiStreamChatEdgeCases:
         call_kwargs = mock_client.aio.models.generate_content_stream.call_args.kwargs
         config = call_kwargs["config"]
         assert not hasattr(config, "tool_config") or config.tool_config is None
+
+
+class TestGeminiAttachmentConversion:
+    """Test _convert_message with image and PDF attachments."""
+
+    def _mock_types(self):
+        types = MagicMock()
+        types.Content.side_effect = lambda **kwargs: MagicMock(**kwargs)
+        return types
+
+    def test_convert_message_with_image(self) -> None:
+        import base64
+        from custom_components.universal_llm_conversation.providers.gemini import GeminiProvider
+
+        msg = {
+            "role": "user",
+            "content": "describe this",
+            "attachments": [
+                {"mime_type": "image/jpeg", "data_base64": base64.b64encode(b"fake_img").decode()}
+            ],
+        }
+        mock_types = self._mock_types()
+        result = GeminiProvider._convert_message(msg, mock_types)
+        assert result.role == "user"
+        assert mock_types.Part.from_text.called
+        assert mock_types.Part.from_bytes.called
+        call_kwargs = mock_types.Part.from_bytes.call_args.kwargs
+        assert call_kwargs["mime_type"] == "image/jpeg"
+        assert call_kwargs["data"] == b"fake_img"
+
+    def test_convert_message_with_pdf(self) -> None:
+        import base64
+        from custom_components.universal_llm_conversation.providers.gemini import GeminiProvider
+
+        msg = {
+            "role": "user",
+            "content": "summarize this",
+            "attachments": [
+                {"mime_type": "application/pdf", "data_base64": base64.b64encode(b"fake_pdf").decode()}
+            ],
+        }
+        mock_types = self._mock_types()
+        result = GeminiProvider._convert_message(msg, mock_types)
+        call_kwargs = mock_types.Part.from_bytes.call_args.kwargs
+        assert call_kwargs["mime_type"] == "application/pdf"
+        assert call_kwargs["data"] == b"fake_pdf"
+
+    def test_convert_message_without_attachments(self) -> None:
+        from custom_components.universal_llm_conversation.providers.gemini import GeminiProvider
+
+        msg = {"role": "user", "content": "hello"}
+        mock_types = self._mock_types()
+        result = GeminiProvider._convert_message(msg, mock_types)
+        assert result.role == "user"
+        assert mock_types.Part.from_text.called
+        assert not mock_types.Part.from_bytes.called

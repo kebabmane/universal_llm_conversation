@@ -141,6 +141,82 @@ def test_convert_content_to_param_empty_tool_calls_popped() -> None:
     assert "tool_calls" not in result[0]
 
 
+def test_convert_content_to_param_with_image() -> None:
+    """Test user message with image attachment gets base64-encoded."""
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    att = MagicMock()
+    att.mime_type = "image/jpeg"
+    att.path = MagicMock()
+    att.path.read_bytes = MagicMock(return_value=b"fake_image_data")
+
+    content = [
+        conversation.UserContent(content="describe this", attachments=[att]),
+    ]
+    result = _convert_content_to_param(content)
+    assert result[0]["role"] == "user"
+    assert result[0]["content"] == "describe this"
+    assert "attachments" in result[0]
+    assert len(result[0]["attachments"]) == 1
+    assert result[0]["attachments"][0]["mime_type"] == "image/jpeg"
+    import base64
+    assert result[0]["attachments"][0]["data_base64"] == base64.b64encode(b"fake_image_data").decode()
+
+
+def test_convert_content_to_param_with_pdf() -> None:
+    """Test user message with PDF attachment gets base64-encoded."""
+    from unittest.mock import MagicMock
+
+    att = MagicMock()
+    att.mime_type = "application/pdf"
+    att.path = MagicMock()
+    att.path.read_bytes = MagicMock(return_value=b"fake_pdf_data")
+
+    content = [
+        conversation.UserContent(content="summarize this", attachments=[att]),
+    ]
+    result = _convert_content_to_param(content)
+    assert result[0]["attachments"][0]["mime_type"] == "application/pdf"
+    import base64
+    assert result[0]["attachments"][0]["data_base64"] == base64.b64encode(b"fake_pdf_data").decode()
+
+
+def test_resize_image_if_needed_passthrough_non_image() -> None:
+    """Test _resize_image_if_needed passes through non-image data unchanged."""
+    from custom_components.universal_llm_conversation.entity import _resize_image_if_needed
+    data = b"not_an_image"
+    assert _resize_image_if_needed(data, "application/pdf") == data
+
+
+def test_resize_image_if_needed_passthrough_no_pillow() -> None:
+    """Test _resize_image_if_needed passes through when Pillow is unavailable."""
+    from unittest.mock import patch
+    from custom_components.universal_llm_conversation.entity import _resize_image_if_needed
+    with patch.dict("sys.modules", {"PIL": None}):
+        data = b"fake_image"
+        assert _resize_image_if_needed(data, "image/jpeg") == data
+
+
+def test_resize_image_if_needed_resizes_oversized() -> None:
+    """Test _resize_image_if_needed downsamples images exceeding max dimension."""
+    from PIL import Image
+    import io
+    from custom_components.universal_llm_conversation.entity import _resize_image_if_needed
+
+    # Create a 2000x1000 image
+    img = Image.new("RGB", (2000, 1000), color="red")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    original_data = buf.getvalue()
+
+    result = _resize_image_if_needed(original_data, "image/jpeg")
+
+    # Verify it was resized
+    result_img = Image.open(io.BytesIO(result))
+    assert max(result_img.size) <= 1568
+
+
 @pytest.mark.usefixtures("mock_validate_connection")
 async def test_entity_device_info_no_fallback(
     hass: HomeAssistant,
