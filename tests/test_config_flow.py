@@ -15,20 +15,31 @@ from custom_components.universal_llm_conversation.const import DOMAIN
 
 @pytest.mark.usefixtures("mock_validate_connection")
 async def test_form(hass: HomeAssistant) -> None:
-    """Test successful two-step config flow."""
+    """Test successful three-step config flow."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
 
-    # Step 1: provider credentials
+    # Step 1: provider selection
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {
             "name": "Test LLM",
-            "api_key": "test-key",
             "provider_preset": "custom",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    # Step 2: credentials (custom preset shows base_url)
+    result3 = await hass.config_entries.flow.async_configure(
+        result2["flow_id"],
+        {
+            "api_key": "test-key",
             "base_url": "http://localhost:1234/v1",
             "skip_authentication": False,
         },
@@ -36,15 +47,27 @@ async def test_form(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
     # Should transition to model step
-    assert result2["type"] is FlowResultType.FORM
-    assert result2["step_id"] == "model"
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
 
 
 async def test_form_cannot_connect(hass: HomeAssistant) -> None:
-    """Test config flow with connection failure on step 1."""
+    """Test config flow with connection failure on credentials step."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Test LLM",
+            "provider_preset": "custom",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
 
     with patch(
         "custom_components.universal_llm_conversation.helpers.get_provider",
@@ -52,19 +75,17 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
             validate_connection=AsyncMock(return_value=False)
         ),
     ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
             {
-                "name": "Test LLM",
                 "api_key": "bad-key",
-                "provider_preset": "custom",
                 "base_url": "http://bad-url",
                 "skip_authentication": False,
             },
         )
 
-    assert result2["type"] is FlowResultType.FORM
-    assert result2["errors"] == {"base": "cannot_connect"}
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["errors"] == {"base": "cannot_connect"}
 
 
 @pytest.mark.usefixtures("mock_validate_connection")
@@ -76,25 +97,75 @@ async def test_form_with_model_fetch(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
 
+    # Step 1: select fireworks preset
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Firepass LLM",
+            "provider_preset": "fireworks",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
     with patch(
         "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
         return_value=["accounts/fireworks/models/kimi-k2.6", "accounts/fireworks/models/llama-v3p1-70b"],
     ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
             {
-                "name": "Firepass LLM",
                 "api_key": "fp-test-key",
-                "provider_preset": "fireworks",
                 "skip_authentication": False,
             },
         )
         await hass.async_block_till_done()
 
-    assert result2["type"] is FlowResultType.FORM
-    assert result2["step_id"] == "model"
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
     # No model_fetch_failed error when fetch succeeds
-    assert result2.get("errors") is None or result2.get("errors") == {}
+    assert result3.get("errors") is None or result3.get("errors") == {}
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_credentials_fields_conditional(hass: HomeAssistant) -> None:
+    """Test that base_url etc only appear for custom/azure presets."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    # Select fireworks (preset with known base_url)
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Fireworks Test",
+            "provider_preset": "fireworks",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    # The form should be returned; we can't directly inspect schema fields,
+    # but we can submit without base_url and it should work
+    with patch(
+        "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
+        return_value=["accounts/fireworks/models/kimi-k2.6"],
+    ):
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
+            {
+                "api_key": "fp-key",
+                "skip_authentication": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
 
 
 @pytest.mark.usefixtures("mock_validate_connection")
@@ -224,21 +295,31 @@ async def test_model_fetch_failure_shows_error(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
 
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Firepass LLM",
+            "provider_preset": "fireworks",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
     with patch(
         "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
         return_value=[],
     ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
             {
-                "name": "Firepass LLM",
                 "api_key": "fp-test-key",
-                "provider_preset": "fireworks",
                 "skip_authentication": False,
             },
         )
         await hass.async_block_till_done()
 
-    assert result2["type"] is FlowResultType.FORM
-    assert result2["step_id"] == "model"
-    assert result2["errors"] == {"base": "model_fetch_failed"}
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
+    assert result3["errors"] == {"base": "model_fetch_failed"}

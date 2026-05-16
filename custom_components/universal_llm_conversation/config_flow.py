@@ -83,28 +83,6 @@ from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Optional(CONF_NAME, default="Universal LLM"): str,
-        vol.Required(CONF_API_KEY): str,
-        vol.Required(CONF_PROVIDER_PRESET, default="fireworks"): SelectSelector(
-            SelectSelectorConfig(
-                options=[
-                    SelectOptionDict(value=k, label=v["label"])
-                    for k, v in PROVIDER_PRESETS.items()
-                ],
-                mode=SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Optional(CONF_BASE_URL): str,
-        vol.Optional(CONF_API_VERSION): str,
-        vol.Optional(CONF_ORGANIZATION): str,
-        vol.Optional(
-            CONF_SKIP_AUTHENTICATION, default=DEFAULT_SKIP_AUTHENTICATION
-        ): BooleanSelector(),
-    }
-)
-
 DEFAULT_CONF_FUNCTION_TOOLS_STR = yaml.dump(DEFAULT_CONF_FUNCTION_TOOLS, sort_keys=False)
 
 DEFAULT_OPTIONS = types.MappingProxyType(
@@ -176,25 +154,86 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Handle the provider selection step."""
         if user_input is None:
+            schema = vol.Schema(
+                {
+                    vol.Optional(CONF_NAME, default="Universal LLM"): str,
+                    vol.Required(
+                        CONF_PROVIDER_PRESET, default="fireworks"
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value=k, label=v["label"])
+                                for k, v in PROVIDER_PRESETS.items()
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            )
+            return self.async_show_form(step_id="user", data_schema=schema)
+
+        # Store provider selection and proceed to credentials
+        self.context["user_input"] = user_input
+        return await self.async_step_credentials()
+
+    async def async_step_credentials(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the credentials step."""
+        user_data: dict[str, Any] = self.context.get("user_input", {})
+        preset_key = user_data.get(CONF_PROVIDER_PRESET, "custom")
+        preset = PROVIDER_PRESETS.get(preset_key, {})
+
+        if user_input is not None:
+            # Merge credentials into stored user data
+            merged = {**user_data, **user_input}
+            self.context["user_input"] = merged
+
+            errors = {}
+            try:
+                await validate_input(self.hass, merged)
+            except Exception:
+                _LOGGER.exception("Validation error")
+                errors["base"] = "cannot_connect"
+            else:
+                return await self.async_step_model()
+
+            # Show credentials form again with error
             return self.async_show_form(
-                step_id="user", data_schema=STEP_USER_DATA_SCHEMA
+                step_id="credentials",
+                data_schema=self._build_credentials_schema(preset_key),
+                errors=errors,
+                description_placeholders={
+                    "provider": preset.get("label", preset_key),
+                },
             )
 
-        errors = {}
-        try:
-            await validate_input(self.hass, user_input)
-        except Exception:
-            _LOGGER.exception("Validation error")
-            errors["base"] = "cannot_connect"
-        else:
-            # Store provider details in context and proceed to model selection
-            self.context["user_input"] = user_input
-            return await self.async_step_model()
-
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="credentials",
+            data_schema=self._build_credentials_schema(preset_key),
+            description_placeholders={
+                "provider": preset.get("label", preset_key),
+            },
         )
+
+    def _build_credentials_schema(self, preset_key: str) -> vol.Schema:
+        """Build credentials schema based on provider preset."""
+        schema: dict[Any, Any] = {
+            vol.Required(CONF_API_KEY): str,
+            vol.Optional(
+                CONF_SKIP_AUTHENTICATION, default=DEFAULT_SKIP_AUTHENTICATION
+            ): BooleanSelector(),
+        }
+
+        # Only show base_url, api_version, organization for custom or azure
+        if preset_key in ("custom", "azure"):
+            schema[vol.Optional(CONF_BASE_URL)] = str
+            schema[vol.Optional(CONF_API_VERSION)] = str
+            schema[vol.Optional(CONF_ORGANIZATION)] = str
+
+        return vol.Schema(schema)
 
     async def async_step_model(
         self, user_input: dict[str, Any] | None = None

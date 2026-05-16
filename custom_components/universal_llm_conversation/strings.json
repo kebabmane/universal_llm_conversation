@@ -3,11 +3,17 @@
     "step": {
       "user": {
         "title": "Universal LLM Conversation",
-        "description": "Select your LLM provider and enter API credentials.",
+        "description": "Choose a name and select your LLM provider.",
         "data": {
           "name": "Integration Name",
+          "provider_preset": "Provider"
+        }
+      },
+      "credentials": {
+        "title": "API Credentials",
+        "description": "Enter your API key for {provider}.",
+        "data": {
           "api_key": "API Key",
-          "provider_preset": "Provider",
           "base_url": "Base URL (override preset or for Custom/Azure)",
           "api_version": "API Version (optional, for Azure)",
           "organization": "Organization (optional)",
