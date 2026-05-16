@@ -16,7 +16,12 @@ from homeassistant.helpers import entity_registry as er
 
 from openai import AsyncOpenAI
 
-from .providers import MODEL_CAPABILITY_OVERRIDES, OPENAI_COMPATIBLE_CAPABILITIES
+from .providers import (
+    ANTHROPIC_CAPABILITIES,
+    GEMINI_CAPABILITIES,
+    MODEL_CAPABILITY_OVERRIDES,
+    OPENAI_COMPATIBLE_CAPABILITIES,
+)
 from .providers.base import BaseProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
 
@@ -111,8 +116,12 @@ def sanitize_for_speech(text: str, function_names: list[str] | None = None) -> s
     return cleaned
 
 
-def _resolve_capabilities(model: str) -> Any:
-    """Match model against override patterns."""
+def _resolve_capabilities(model: str, provider_key: str | None = None) -> Any:
+    """Match model against override patterns or provider-specific presets."""
+    if provider_key == "anthropic":
+        return ANTHROPIC_CAPABILITIES
+    if provider_key == "gemini":
+        return GEMINI_CAPABILITIES
     for pattern, caps in MODEL_CAPABILITY_OVERRIDES.items():
         if pattern in model.lower() or model.lower().startswith(pattern.replace("-", "")):
             return caps
@@ -130,7 +139,7 @@ def get_provider(
     timeout: float,
 ) -> BaseProvider:
     """Factory to return a provider instance."""
-    capabilities = _resolve_capabilities(model)
+    capabilities = _resolve_capabilities(model, provider_key)
     if provider_key == "openai_compatible":
         return OpenAICompatibleProvider(
             hass=hass,
@@ -142,7 +151,32 @@ def get_provider(
             timeout=timeout,
             capabilities=capabilities,
         )
-    # TODO: Add anthropic and gemini native providers
+    if provider_key == "anthropic":
+        from .providers.anthropic import AnthropicProvider
+
+        return AnthropicProvider(
+            hass=hass,
+            api_key=api_key,
+            base_url=base_url,
+            api_version=api_version,
+            organization=organization,
+            model=model,
+            timeout=timeout,
+            capabilities=capabilities,
+        )
+    if provider_key == "gemini":
+        from .providers.gemini import GeminiProvider
+
+        return GeminiProvider(
+            hass=hass,
+            api_key=api_key,
+            base_url=base_url,
+            api_version=api_version,
+            organization=organization,
+            model=model,
+            timeout=timeout,
+            capabilities=capabilities,
+        )
     raise ValueError(f"Unknown provider: {provider_key}")
 
 

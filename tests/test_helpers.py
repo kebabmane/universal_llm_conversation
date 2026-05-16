@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import google.genai  # noqa: F401
 import pytest
 
 from custom_components.universal_llm_conversation.helpers import (
@@ -247,3 +248,99 @@ class TestSanitizeEdgeCases:
     def test_returns_original_for_empty_string(self) -> None:
         result = sanitize_for_speech("")
         assert result == ""
+
+
+class TestResolveCapabilities:
+    """Test capability resolution with provider key."""
+
+    def test_openai_compatible_by_default(self) -> None:
+        from custom_components.universal_llm_conversation.providers import OPENAI_COMPATIBLE_CAPABILITIES
+
+        caps = _resolve_capabilities("gpt-4o")
+        assert caps == OPENAI_COMPATIBLE_CAPABILITIES
+
+    def test_kimi_override(self) -> None:
+        from custom_components.universal_llm_conversation.providers import MODEL_CAPABILITY_OVERRIDES
+
+        caps = _resolve_capabilities("kimi-k2.6")
+        assert caps == MODEL_CAPABILITY_OVERRIDES["kimi-k2.6"]
+
+    def test_anthropic_by_provider_key(self) -> None:
+        from custom_components.universal_llm_conversation.providers import ANTHROPIC_CAPABILITIES
+
+        caps = _resolve_capabilities("claude-sonnet-4-5", provider_key="anthropic")
+        assert caps == ANTHROPIC_CAPABILITIES
+
+    def test_gemini_by_provider_key(self) -> None:
+        from custom_components.universal_llm_conversation.providers import GEMINI_CAPABILITIES
+
+        caps = _resolve_capabilities("gemini-2.5-flash", provider_key="gemini")
+        assert caps == GEMINI_CAPABILITIES
+
+
+class TestGetProviderFactory:
+    """Test provider factory dispatch."""
+
+    @patch("custom_components.universal_llm_conversation.providers.openai_compatible.AsyncOpenAI")
+    @patch("custom_components.universal_llm_conversation.providers.openai_compatible.get_async_client")
+    def test_factory_openai_compatible(self, mock_get_client, mock_async_openai) -> None:
+        hass = MagicMock()
+        provider = get_provider(
+            hass=hass,
+            provider_key="openai_compatible",
+            api_key="test",
+            base_url="http://localhost/v1",
+            api_version=None,
+            organization=None,
+            model="gpt-4o",
+            timeout=60.0,
+        )
+        assert isinstance(provider, OpenAICompatibleProvider)
+
+    @patch("anthropic.AsyncAnthropic")
+    def test_factory_anthropic(self, mock_async_anthropic: MagicMock) -> None:
+        from custom_components.universal_llm_conversation.providers.anthropic import AnthropicProvider
+
+        hass = MagicMock()
+        provider = get_provider(
+            hass=hass,
+            provider_key="anthropic",
+            api_key="sk-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="claude-sonnet-4-5",
+            timeout=60.0,
+        )
+        assert isinstance(provider, AnthropicProvider)
+
+    @patch("google.genai")
+    def test_factory_gemini(self, mock_genai: MagicMock) -> None:
+        from custom_components.universal_llm_conversation.providers.gemini import GeminiProvider
+
+        hass = MagicMock()
+        provider = get_provider(
+            hass=hass,
+            provider_key="gemini",
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+        )
+        assert isinstance(provider, GeminiProvider)
+
+    def test_factory_unknown_raises(self) -> None:
+        hass = MagicMock()
+        with pytest.raises(ValueError, match="Unknown provider"):
+            get_provider(
+                hass=hass,
+                provider_key="unknown",
+                api_key="test",
+                base_url=None,
+                api_version=None,
+                organization=None,
+                model="test",
+                timeout=60.0,
+            )

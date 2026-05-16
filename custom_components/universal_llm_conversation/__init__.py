@@ -50,7 +50,7 @@ async def async_setup_entry(
                 base_url=base_url,
                 api_version=api_version,
                 organization=organization,
-                model="gpt-4o-mini",
+                model=data.get("chat_model", "gpt-4o-mini"),
                 timeout=10.0,
             )
             await provider.validate_connection()

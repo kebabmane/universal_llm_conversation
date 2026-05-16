@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.17] - 2026-05-16
+
+### Added
+- **Native Anthropic (Claude) provider** — Direct Anthropic API integration with streaming, tool calls, thinking content, and usage metadata:
+  - `providers/anthropic.py` — `AnthropicProvider` with `AsyncAnthropic` client
+  - Thinking/reasoning content emitted as `reasoning_content` chunks (filtered by `hide_thinking` before TTS)
+  - Tool call state machine handles `content_block_start` / `content_block_delta` / `content_block_stop` events
+  - `validate_connection()` maps 401→`invalid_auth`, timeout→`timeout`, everything else→`cannot_connect`
+- **Native Google Gemini provider** — Direct `google-genai` SDK integration with streaming and function calling:
+  - `providers/gemini.py` — `GeminiProvider` with `genai.Client`
+  - `generate_content_stream()` with `GenerateContentConfig` for system instructions and tool config
+  - `FunctionCallingConfig(mode=ANY)` for tool choice mapping (`auto`→`AUTO`, `none`→`NONE`, anything else→`ANY`)
+  - `validate_connection()` maps 401→`invalid_auth`, 5xx→`cannot_connect`
+- **Provider factory dispatch** — `helpers.get_provider()` now routes to all three providers based on `provider_key` (`openai_compatible`, `anthropic`, `gemini`)
+- **Capability-based provider presets** — `PRESET_TO_PROVIDER` maps UI presets to internal provider keys; Anthropic and Gemini presets now instantiate native providers instead of OpenAI-compatible proxies
+
+### Changed
+- Setup validation (`__init__.py`) now uses the user's configured `chat_model` instead of a hardcoded dummy model when calling `provider.validate_connection()`
+- `manifest.json` requirements updated to include `anthropic>=0.102.0,<0.103.0` and `google-genai>=1.28.0,<2.0`
+
+### Testing
+- **226 tests, 93% coverage** — Full suite passes with no failures:
+  - 8 new Anthropic provider tests (init, validation, streaming, message/tool conversion)
+  - 11 new Gemini provider tests (init, validation, streaming, message/tool conversion, tool choice mapping)
+  - 4 new `test_init.py` tests verifying setup dispatches the correct provider and uses configured `chat_model`
+  - 3 new `test_helpers.py` tests for factory dispatch (`openai_compatible`, `anthropic`, `gemini`)
+
 ## [0.1.16] - 2026-05-16
 
 ### Added
