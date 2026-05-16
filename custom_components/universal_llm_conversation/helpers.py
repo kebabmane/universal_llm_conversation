@@ -161,11 +161,7 @@ async def async_fetch_models(
             base_url=base_url,
             timeout=timeout,
         )
-        from functools import partial
-
-        response = await hass.async_add_executor_job(
-            partial(client.models.list, timeout=timeout)
-        )
+        response = client.models.list(timeout=timeout)
         models: list[str] = []
         excluded_keywords = [
             "embed", "embedding", "image", "audio", "tts", "whisper", "stt",
@@ -181,5 +177,5 @@ async def async_fetch_models(
             models.append(model_id)
         return sorted(models)
     except Exception as err:
-        _LOGGER.warning("Failed to fetch models from %s: %s", base_url, err)
+        _LOGGER.error("Failed to fetch models from %s: %s", base_url, err)
         return []

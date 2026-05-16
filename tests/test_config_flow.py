@@ -53,6 +53,8 @@ async def test_form(hass: HomeAssistant) -> None:
 
 async def test_form_cannot_connect(hass: HomeAssistant) -> None:
     """Test config flow with connection failure on credentials step."""
+    from homeassistant.exceptions import HomeAssistantError
+
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -70,10 +72,9 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
     assert result2["step_id"] == "credentials"
 
     with patch(
-        "custom_components.universal_llm_conversation.helpers.get_provider",
-        return_value=MagicMock(
-            validate_connection=AsyncMock(return_value=False)
-        ),
+        "custom_components.universal_llm_conversation.providers.openai_compatible.OpenAICompatibleProvider.validate_connection",
+        new_callable=AsyncMock,
+        side_effect=HomeAssistantError("cannot_connect"),
     ):
         result3 = await hass.config_entries.flow.async_configure(
             result2["flow_id"],
@@ -86,6 +87,82 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
 
     assert result3["type"] is FlowResultType.FORM
     assert result3["errors"] == {"base": "cannot_connect"}
+
+
+async def test_form_invalid_auth(hass: HomeAssistant) -> None:
+    """Test config flow shows invalid_auth error when API key is wrong."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Test LLM",
+            "provider_preset": "custom",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    with patch(
+        "custom_components.universal_llm_conversation.providers.openai_compatible.OpenAICompatibleProvider.validate_connection",
+        new_callable=AsyncMock,
+        side_effect=HomeAssistantError("invalid_auth"),
+    ):
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
+            {
+                "api_key": "bad-key",
+                "base_url": "http://bad-url",
+                "skip_authentication": False,
+            },
+        )
+
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["errors"] == {"base": "invalid_auth"}
+
+
+async def test_form_timeout(hass: HomeAssistant) -> None:
+    """Test config flow shows timeout error when provider is unreachable."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Test LLM",
+            "provider_preset": "custom",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    with patch(
+        "custom_components.universal_llm_conversation.providers.openai_compatible.OpenAICompatibleProvider.validate_connection",
+        new_callable=AsyncMock,
+        side_effect=HomeAssistantError("timeout"),
+    ):
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
+            {
+                "api_key": "test-key",
+                "base_url": "http://localhost:1234/v1",
+                "skip_authentication": False,
+            },
+        )
+
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["errors"] == {"base": "timeout"}
 
 
 @pytest.mark.usefixtures("mock_validate_connection")

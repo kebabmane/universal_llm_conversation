@@ -176,8 +176,10 @@ class TestValidateConnection:
             )
         provider._client.models.list = MagicMock(side_effect=ConnectionError(" refused"))
 
-        result = await provider.validate_connection()
-        assert result is False
+        from homeassistant.exceptions import HomeAssistantError
+
+        with pytest.raises(HomeAssistantError):
+            await provider.validate_connection()
 
 
 class TestStreamChat:

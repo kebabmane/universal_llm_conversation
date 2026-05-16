@@ -12,6 +12,7 @@ from openai import AsyncAzureOpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletionChunk
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.httpx_client import get_async_client
 
 from ..const import CONF_SCHEMA_STRICT, DEFAULT_SCHEMA_STRICT
@@ -56,16 +57,33 @@ class OpenAICompatibleProvider(BaseProvider):
 
     async def validate_connection(self) -> bool:
         """Validate by listing models with a short timeout."""
+        from openai import (
+            APIConnectionError,
+            APITimeoutError,
+            AuthenticationError,
+            APIStatusError,
+        )
+
         try:
-            response = await self.hass.async_add_executor_job(
-                partial(self._client.models.list, timeout=10)
-            )
+            response = self._client.models.list(timeout=10)
             async for _ in response:
                 break
             return True
+        except AuthenticationError as err:
+            _LOGGER.error("Provider authentication failed: %s", err)
+            raise HomeAssistantError("invalid_auth")
+        except APITimeoutError as err:
+            _LOGGER.error("Provider connection timed out: %s", err)
+            raise HomeAssistantError("timeout")
+        except APIConnectionError as err:
+            _LOGGER.error("Provider connection error: %s", err)
+            raise HomeAssistantError("cannot_connect")
+        except APIStatusError as err:
+            _LOGGER.error("Provider returned HTTP %s: %s", err.status_code, err.message)
+            raise HomeAssistantError("cannot_connect")
         except Exception as err:
-            _LOGGER.warning("Provider validation failed: %s", err)
-            return False
+            _LOGGER.error("Provider validation failed: %s", err)
+            raise HomeAssistantError("cannot_connect")
 
     async def stream_chat(
         self,

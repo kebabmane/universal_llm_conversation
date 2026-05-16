@@ -119,7 +119,13 @@ def _get_base_url_from_preset(data: dict[str, Any]) -> str | None:
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
-    """Validate user input allows us to connect."""
+    """Validate user input allows us to connect.
+
+    Raises HomeAssistantError with a machine-readable error key:
+    - invalid_auth
+    - timeout
+    - cannot_connect
+    """
     api_key = data[CONF_API_KEY]
     base_url = _get_base_url_from_preset(data)
     api_version = data.get(CONF_API_VERSION)
@@ -141,9 +147,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
         timeout=10.0,
     )
 
-    ok = await provider.validate_connection()
-    if not ok:
-        raise HomeAssistantError("Could not connect to LLM provider")
+    await provider.validate_connection()
 
 
 class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -194,8 +198,11 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             errors = {}
             try:
                 await validate_input(self.hass, merged)
+            except HomeAssistantError as err:
+                _LOGGER.error("Validation error: %s", err)
+                errors["base"] = str(err) if str(err) else "cannot_connect"
             except Exception:
-                _LOGGER.exception("Validation error")
+                _LOGGER.exception("Unexpected validation error")
                 errors["base"] = "cannot_connect"
             else:
                 return await self.async_step_model()

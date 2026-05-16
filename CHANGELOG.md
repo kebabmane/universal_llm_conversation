@@ -79,6 +79,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Conditional credential fields** — `base_url` is no longer shown when a preset already knows its URL (e.g. Fireworks, OpenRouter, Ollama), reducing confusion
 - **Updated tests** — Config flow integration tests rewritten for 3-step navigation
 
+## [0.1.8] - 2026-05-16
+
+### Fixed
+- **Live validation connection errors** — Removed `async_add_executor_job` wrapper from `validate_connection()` and `async_fetch_models()` that caused thread-pool/HTTP client conflicts
+- **Specific error messages during setup** — Instead of a generic "cannot_connect", the config flow now shows:
+  - `invalid_auth` — when API key is rejected
+  - `timeout` — when provider is unreachable
+  - `cannot_connect` — for general connection or HTTP errors
+- **Proper exception propagation** — `validate_connection()` now raises `HomeAssistantError` with machine-readable keys instead of returning `False`, so the real failure reason surfaces in the UI
+- **Model fetch error logging** — Failed model list fetches now log at ERROR level instead of silently returning empty lists
+
+### Testing
+- **156 tests, 93% coverage** — Added integration tests for `invalid_auth` and `timeout` error paths in config flow
+- Updated provider unit tests to match new exception-based validation behavior
+
 ## [Unreleased]
 
 - Native Anthropic provider

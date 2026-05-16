@@ -41,7 +41,9 @@ class TestValidateInput:
         with patch(
             "custom_components.universal_llm_conversation.config_flow.get_provider",
             return_value=MagicMock(
-                validate_connection=AsyncMock(return_value=False)
+                validate_connection=AsyncMock(
+                    side_effect=HomeAssistantError("cannot_connect")
+                )
             ),
         ), pytest.raises(HomeAssistantError):
             await validate_input(
