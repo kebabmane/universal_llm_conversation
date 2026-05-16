@@ -53,6 +53,7 @@ from .const import (
     CONF_SKIP_AUTHENTICATION,
     CONF_TEMPERATURE,
     CONF_TOP_P,
+    CONF_TTS_STREAMING_MODE,
     DEFAULT_ADVANCED_OPTIONS,
 
     DEFAULT_CHAT_MODEL,
@@ -71,6 +72,7 @@ from .const import (
     DEFAULT_SKIP_AUTHENTICATION,
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
+    DEFAULT_TTS_STREAMING_MODE,
     DOMAIN,
     FIREPASS_MODELS,
     PRESET_TO_PROVIDER,
@@ -99,6 +101,7 @@ DEFAULT_OPTIONS = types.MappingProxyType(
         CONF_HIDE_THINKING: DEFAULT_HIDE_THINKING,
         CONF_REQUEST_TIMEOUT: DEFAULT_REQUEST_TIMEOUT,
         CONF_FALLBACK_MODEL: DEFAULT_FALLBACK_MODEL,
+        CONF_TTS_STREAMING_MODE: DEFAULT_TTS_STREAMING_MODE,
     }
 )
 
@@ -457,6 +460,17 @@ class UniversalLLMSubentryFlowHandler(ConfigSubentryFlow):
             vol.Optional(
                 CONF_FALLBACK_MODEL, default=DEFAULT_FALLBACK_MODEL
             ): str,
+            vol.Optional(
+                CONF_TTS_STREAMING_MODE, default=DEFAULT_TTS_STREAMING_MODE
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="token", label="Token/word (fastest start)"),
+                        SelectOptionDict(value="sentence", label="Sentence (better voice quality)"),
+                    ],
+                    mode=SelectSelectorMode.LIST,
+                )
+            ),
         }
 
         return self.async_show_form(

@@ -479,4 +479,151 @@ class TestEntityHelpers:
         assert usage_accumulator["completion_tokens"] == 4
         assert usage_accumulator["total_tokens"] == 12
 
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_sentence_mode_single(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test sentence mode yields one sentence when boundary found."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "Hello world."}
+            yield {"finish_reason": "stop"}
+
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 1
+        assert content_deltas[0]["content"] == "Hello world."
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_sentence_mode_multi(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test sentence mode splits multi-sentence chunks."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "First sentence. Second sentence? Third!"}
+            yield {"finish_reason": "stop"}
+
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 3
+        assert content_deltas[0]["content"] == "First sentence."
+        assert content_deltas[1]["content"] == " Second sentence?"
+        assert content_deltas[2]["content"] == " Third!"
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_sentence_mode_no_boundary(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test sentence mode buffers unterminated text until stream end."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "No boundary here"}
+            yield {"finish_reason": "stop"}
+
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 1
+        assert content_deltas[0]["content"] == "No boundary here"
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_sentence_mode_tool_call_flush(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test tool call forces sentence buffer flush."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "Before tool "}
+            yield {"tool_calls": [{"id": "call_1", "tool_name": "test", "tool_args": {}}]}
+            yield {"finish_reason": "stop"}
+
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 1
+        assert content_deltas[0]["content"] == "Before tool "
+        tool_deltas = [d for d in results if "tool_calls" in d]
+        assert len(tool_deltas) == 1
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_sentence_mode_unicode(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test Unicode sentence boundaries (。, ？, ！)."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "你好。怎么样？很好！"}
+            yield {"finish_reason": "stop"}
+
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 3
+        assert content_deltas[0]["content"] == "你好。"
+        assert content_deltas[1]["content"] == "怎么样？"
+        assert content_deltas[2]["content"] == "很好！"
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_token_mode_unchanged(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test token mode still yields raw chunks."""
+        subentry = next(iter(mock_config_entry.subentries.values()))
+        hass.config_entries.async_update_subentry(
+            mock_config_entry,
+            subentry,
+            data={**subentry.data, "tts_streaming_mode": "token"},
+        )
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "Hello"}
+            yield {"content": " world"}
+            yield {"finish_reason": "stop"}
+
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=[], usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 2
+        assert content_deltas[0]["content"] == "Hello"
+        assert content_deltas[1]["content"] == " world"
+
 

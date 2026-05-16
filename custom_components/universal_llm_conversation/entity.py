@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any, Callable
 
 import voluptuous as vol
@@ -28,6 +29,7 @@ from .const import (
     CONF_SKILLS,
     CONF_TEMPERATURE,
     CONF_TOP_P,
+    CONF_TTS_STREAMING_MODE,
     DEFAULT_CHAT_MODEL,
     DEFAULT_CONTEXT_THRESHOLD,
     DEFAULT_HIDE_THINKING,
@@ -38,8 +40,13 @@ from .const import (
     DEFAULT_SHORTEN_TOOL_CALL_ID,
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
+    DEFAULT_TTS_STREAMING_MODE,
     DOMAIN,
     PRESET_TO_PROVIDER,
+)
+
+_SENTENCE_BOUNDARY_RE = re.compile(
+    r'(?<=[.!?…])(?=\s|$)|(?<=。)(?=.)|(?<=？)(?=.)|(?<=！)(?=.)|\n\n|\n'
 )
 from .exceptions import FunctionNotFound, TokenLengthExceededError
 from .functions import get_function
@@ -304,6 +311,29 @@ class UniversalLLMBaseEntity(Entity):
         """Transform provider stream to Home Assistant format."""
         current_tool_calls: dict[int, dict[str, Any]] = {}
         first_chunk = True
+        sentence_mode = (
+            self.subentry.data.get(CONF_TTS_STREAMING_MODE, DEFAULT_TTS_STREAMING_MODE)
+            == "sentence"
+        )
+        sentence_buffer = ""
+
+        def _flush_sentence_buffer(final: bool = False) -> list[dict[str, Any]]:
+            """Extract complete sentences from buffer, optionally flushing remainder."""
+            nonlocal sentence_buffer
+            deltas: list[dict[str, Any]] = []
+            while True:
+                match = _SENTENCE_BOUNDARY_RE.search(sentence_buffer)
+                if not match:
+                    break
+                end = match.end()
+                sentence = sentence_buffer[:end]
+                sentence_buffer = sentence_buffer[end:]
+                if sentence:
+                    deltas.append({"content": sentence})
+            if final and sentence_buffer:
+                deltas.append({"content": sentence_buffer})
+                sentence_buffer = ""
+            return deltas
 
         async for chunk in stream:
             if first_chunk:
@@ -329,15 +359,28 @@ class UniversalLLMBaseEntity(Entity):
                 continue
 
             if "content" in chunk:
-                yield {"content": chunk["content"]}
+                if sentence_mode:
+                    sentence_buffer += chunk["content"]
+                    for delta in _flush_sentence_buffer():
+                        yield delta
+                else:
+                    yield {"content": chunk["content"]}
 
             if "reasoning_content" in chunk:
                 if not hide_thinking:
-                    yield {"content": chunk["reasoning_content"]}
+                    if sentence_mode:
+                        sentence_buffer += chunk["reasoning_content"]
+                        for delta in _flush_sentence_buffer():
+                            yield delta
+                    else:
+                        yield {"content": chunk["reasoning_content"]}
                 else:
                     reasoning_parts.append(chunk["reasoning_content"])
 
             if "tool_calls" in chunk:
+                if sentence_mode and sentence_buffer:
+                    for delta in _flush_sentence_buffer(final=True):
+                        yield delta
                 tool_calls_list = []
                 for tc in chunk["tool_calls"]:
                     tool_calls_list.append(
@@ -352,9 +395,18 @@ class UniversalLLMBaseEntity(Entity):
                     yield {"tool_calls": tool_calls_list}
 
             if chunk.get("finish_reason") == "length":
+                if sentence_mode and sentence_buffer:
+                    for delta in _flush_sentence_buffer(final=True):
+                        yield delta
                 raise TokenLengthExceededError(
                     self.subentry.data.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS)
                 )
+
+            if chunk.get("finish_reason") == "stop":
+                if sentence_mode and sentence_buffer:
+                    for delta in _flush_sentence_buffer(final=True):
+                        yield delta
+                break
 
     async def _execute_function_tool(
         self,

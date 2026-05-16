@@ -62,7 +62,8 @@
           "shorten_tool_call_id": "Shorten Tool Call IDs (Mistral compatibility)",
           "schema_strict": "Strict Function Schemas",
           "hide_thinking": "Hide Thinking / Reasoning Content",
-          "fallback_model": "Fallback Model (on errors)"
+          "fallback_model": "Fallback Model (on errors)",
+          "tts_streaming_mode": "TTS Streaming Mode"
         }
       }
     }

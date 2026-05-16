@@ -294,6 +294,10 @@ DEFAULT_REQUEST_TIMEOUT = 60
 CONF_FALLBACK_MODEL = "fallback_model"
 DEFAULT_FALLBACK_MODEL = ""
 
+CONF_TTS_STREAMING_MODE = "tts_streaming_mode"
+DEFAULT_TTS_STREAMING_MODE = "sentence"
+TTS_STREAMING_MODES = ["token", "sentence"]
+
 # Skills
 CONF_SKILLS = "skills"
 DEFAULT_SKILLS_DIRECTORY = "skills"

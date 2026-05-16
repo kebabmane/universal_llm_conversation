@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.16] - 2026-05-16
+
+### Added
+- **Sentence-level TTS streaming** — New `tts_streaming_mode` option with two modes:
+  - **`sentence` (default)** — Buffers LLM output to sentence boundaries (`. `, `? `, `! `, `…`, `。`, `？`, `！`, newline) before yielding to TTS. Gives the TTS engine full sentence context for natural prosody and intonation. Best for voice-first interactions.
+  - **`token`** — Yields raw tokens/words as they arrive from the LLM. Lowest latency to first audio byte. Good for chat UI or impatient users.
+- **Tool-call sentence flush** — When a tool call interrupts the assistant mid-sentence, the buffer is flushed first so TTS doesn't speak a half-sentence before the tool result
+- **Unicode sentence boundaries** — Chinese/Japanese sentence terminators `。`, `？`, `！` are detected without requiring whitespace after them
+
+### Changed
+- `_transform_stream()` now supports `sentence_mode` via `_flush_sentence_buffer()` helper
+- `DEFAULT_TTS_STREAMING_MODE` set to `"sentence"` for best voice quality out of the box
+
+### Testing
+- **183 tests, 96% coverage** — Added 6 new tests:
+  - `test_transform_stream_sentence_mode_single` — single sentence yields immediately
+  - `test_transform_stream_sentence_mode_multi` — multi-sentence chunk splits correctly
+  - `test_transform_stream_sentence_mode_no_boundary` — unterminated text buffered until stream end
+  - `test_transform_stream_sentence_mode_tool_call_flush` — tool calls force buffer flush
+  - `test_transform_stream_sentence_mode_unicode` — CJK punctuation boundaries
+  - `test_transform_stream_token_mode_unchanged` — token mode preserves raw chunk behavior
+
 ## [0.1.5] - 2026-05-15
 
 ### Fixed
