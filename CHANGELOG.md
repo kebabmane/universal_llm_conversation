@@ -104,6 +104,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 - **158 tests** — Added tests for 403 handling in `validate_connection()`, `async_fetch_models()`, and config flow model step
 
+## [0.1.10] - 2026-05-16
+
+### Added
+- **Fireworks AI — Fire Pass preset** — Dedicated preset for Fire Pass ($49/month early access) subscribers:
+  - **Single model**: `accounts/fireworks/routers/kimi-k2p6-turbo` shown as the only option with label *"Kimi 2.6 included with Fire Pass"*
+  - **No live validation** — skips the `validate_connection()` call that would 403 on `/v1/models`
+  - **No fallback model field** — Fire Pass only covers one model
+  - **No red error banner** — clean setup flow without the `model_list_restricted` warning
+
+### Testing
+- **160 tests** — Added integration test for Fire Pass preset flow (skip validation, single model selection, subentry creation)
+
 ## [Unreleased]
 
 - Native Anthropic provider

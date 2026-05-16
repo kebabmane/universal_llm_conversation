@@ -76,6 +76,7 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     DOMAIN,
+    FIREPASS_MODELS,
     PROVIDER_PRESETS,
 )
 from .helpers import async_fetch_models, get_provider
@@ -195,6 +196,11 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             merged = {**user_data, **user_input}
             self.context["user_input"] = merged
 
+            # Skip live validation for Fire Pass — the key is restricted to a
+            # single model and will 403 on /v1/models, but works for chat.
+            if preset_key == "fireworks_firepass":
+                return await self.async_step_model()
+
             errors = {}
             try:
                 await validate_input(self.hass, merged)
@@ -309,15 +315,29 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             )
+        elif preset_key == "fireworks_firepass":
+            # Fire Pass has a single curated model — show it as the only option
+            schema[
+                vol.Required(CONF_CHAT_MODEL, default=FIREPASS_MODELS[0])
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=FIREPASS_MODELS[0], label="Kimi 2.6 included with Fire Pass")
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
         else:
             # Show plain text input when fetch failed or not supported
             schema[
                 vol.Required(CONF_CHAT_MODEL, default=DEFAULT_CHAT_MODEL)
             ] = str
 
-        schema[
-            vol.Optional(CONF_FALLBACK_MODEL, default=DEFAULT_FALLBACK_MODEL)
-        ] = str
+        # Hide fallback model for Fire Pass — only one model is covered
+        if preset_key != "fireworks_firepass":
+            schema[
+                vol.Optional(CONF_FALLBACK_MODEL, default=DEFAULT_FALLBACK_MODEL)
+            ] = str
 
         errors = {}
         if supports_model_list and not models:

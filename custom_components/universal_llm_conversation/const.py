@@ -24,6 +24,11 @@ PROVIDER_PRESETS = {
         "base_url": "https://api.fireworks.ai/inference/v1",
         "supports_model_list": True,
     },
+    "fireworks_firepass": {
+        "label": "Fireworks AI — Fire Pass (Kimi K2.6 Turbo)",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "supports_model_list": False,
+    },
     "openai": {
         "label": "OpenAI",
         "base_url": "https://api.openai.com/v1",
@@ -60,6 +65,11 @@ PROVIDER_PRESETS = {
         "supports_model_list": True,
     },
 }
+
+# Fire Pass curated model list
+FIREPASS_MODELS = [
+    "accounts/fireworks/routers/kimi-k2p6-turbo",
+]
 
 # Legacy provider registry keys (used internally)
 PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"

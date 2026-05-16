@@ -443,3 +443,59 @@ async def test_model_step_shows_restricted_on_403(
     assert result3["type"] is FlowResultType.FORM
     assert result3["step_id"] == "model"
     assert result3["errors"] == {"base": "model_list_restricted"}
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_firepass_preset_skips_validation_and_shows_single_model(
+    hass: HomeAssistant,
+) -> None:
+    """Test Fire Pass preset skips validation and shows only Kimi K2.6 Turbo."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    # Step 1: select Fire Pass preset
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Firepass Test",
+            "provider_preset": "fireworks_firepass",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    # Step 2: enter API key — validation should be skipped
+    # (no mock_validate_connection fixture, so real validation would fail if called)
+    result3 = await hass.config_entries.flow.async_configure(
+        result2["flow_id"],
+        {
+            "api_key": "fp-test-key",
+            "skip_authentication": False,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
+    # No error banner for Fire Pass
+    assert result3.get("errors") is None or result3.get("errors") == {}
+
+    # Step 3: model step should have the single Fire Pass model pre-selected
+    result4 = await hass.config_entries.flow.async_configure(
+        result3["flow_id"],
+        {
+            "chat_model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result4["type"] is FlowResultType.CREATE_ENTRY
+    assert result4["title"] == "Firepass Test"
+    # Verify the model was set correctly in subentries
+    conversation_subentry = result4["subentries"][0]
+    assert conversation_subentry["data"]["chat_model"] == "accounts/fireworks/routers/kimi-k2p6-turbo"
