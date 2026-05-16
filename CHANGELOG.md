@@ -128,6 +128,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 - **163 tests, 94% coverage** — Added tests for `base_url` persistence in config flow entry data and Fire Pass runtime validation skip
 
+## [0.1.12] - 2026-05-16
+
+### Fixed
+- **Critical: Conversation runtime defaulted to OpenAI endpoint for ALL providers** — `entity.py` `_get_provider()` was passing `base_url=None` to the OpenAI SDK whenever the config entry did not explicitly store a `base_url` (which is the case for all preset providers: Fireworks, OpenRouter, Ollama, OpenAI, etc.). The OpenAI SDK then defaulted to `https://api.openai.com/v1`, causing `401 Unauthorized` for every non-OpenAI API key at conversation time. Setup validation appeared to work because `__init__.py` had the fix, but the actual chat request was always hitting OpenAI:
+  - `entity.py` `_get_provider()` now calls `_get_base_url_from_preset()` as a fallback when `base_url` is not in entry data
+  - This ensures Fireworks, Fire Pass, Ollama, OpenRouter, and all other preset providers hit their correct endpoints during conversation
+  - Old entries without persisted `base_url` are automatically fixed at runtime
+
+### Testing
+- **165 tests, 94% coverage** — Added test for `_get_provider()` base_url resolution from preset at conversation runtime
+
 ## [Unreleased]
 
 - Native Anthropic provider

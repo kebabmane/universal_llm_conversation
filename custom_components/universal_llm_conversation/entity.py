@@ -44,7 +44,7 @@ from .const import (
 )
 from .exceptions import FunctionNotFound, ParseArgumentsFailed, TokenLengthExceededError
 from .functions import get_function
-from .helpers import get_exposed_entities, get_provider, sanitize_for_speech, shorten_tool_call_id
+from .helpers import _get_base_url_from_preset, get_exposed_entities, get_provider, sanitize_for_speech, shorten_tool_call_id
 from .skills import Skill, SkillManager
 
 if TYPE_CHECKING:
@@ -164,11 +164,13 @@ class UniversalLLMBaseEntity(Entity):
         options = self.subentry.data
         model = model_override or options.get(CONF_CHAT_MODEL, DEFAULT_CHAT_MODEL)
         timeout = options.get(CONF_REQUEST_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
+        # Resolve base_url from preset when not explicitly stored (e.g. preset providers)
+        base_url = data.get("base_url") or _get_base_url_from_preset(data)
         return get_provider(
             hass=self.hass,
             provider_key=data.get("provider", "openai_compatible"),
             api_key=data.get("api_key", ""),
-            base_url=data.get("base_url"),
+            base_url=base_url,
             api_version=data.get("api_version"),
             organization=data.get("organization"),
             model=model,

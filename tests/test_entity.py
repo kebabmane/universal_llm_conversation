@@ -278,6 +278,50 @@ class TestEntityHelpers:
         assert chat_log.content[1].content == "bye"
 
     @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_get_provider_resolves_base_url_from_preset(self, hass: HomeAssistant) -> None:
+        """Test that _get_provider() resolves base_url from preset at conversation runtime."""
+        from pytest_homeassistant_custom_component.common import MockConfigEntry
+        from homeassistant.config_entries import ConfigSubentryData
+        from custom_components.universal_llm_conversation.config_flow import DEFAULT_OPTIONS
+
+        # Create entry with fireworks preset but NO base_url (simulating old/pre-fix entry)
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Fireworks Test",
+            data={
+                "api_key": "fp-test-key",
+                "provider_preset": "fireworks",
+                # base_url intentionally omitted
+                "skip_authentication": False,
+            },
+            version=1,
+            subentries_data=[
+                ConfigSubentryData(
+                    data=dict(DEFAULT_OPTIONS),
+                    subentry_type="conversation",
+                    title="Test Conversation",
+                    unique_id=None,
+                ),
+            ],
+        )
+        entry.add_to_hass(hass)
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        agent = conversation.get_agent_manager(hass).async_get_agent(entry.entry_id)
+        assert agent is not None
+
+        with patch(
+            "custom_components.universal_llm_conversation.entity.get_provider",
+            return_value=MagicMock(),
+        ) as mock_get_provider:
+            provider = agent._get_provider()
+
+        # Verify get_provider was called with the resolved Fireworks base_url
+        call_kwargs = mock_get_provider.call_args.kwargs
+        assert call_kwargs["base_url"] == "https://api.fireworks.ai/inference/v1"
+
+    @pytest.mark.usefixtures("mock_validate_connection")
     async def test_get_function_tools_error_handling(self, hass: HomeAssistant, mock_config_entry: object) -> None:
         await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
