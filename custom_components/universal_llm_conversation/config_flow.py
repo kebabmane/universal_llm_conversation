@@ -79,7 +79,7 @@ from .const import (
     FIREPASS_MODELS,
     PROVIDER_PRESETS,
 )
-from .helpers import async_fetch_models, get_provider
+from .helpers import async_fetch_models, get_provider, _get_base_url_from_preset
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,18 +105,6 @@ DEFAULT_OPTIONS = types.MappingProxyType(
         CONF_FALLBACK_MODEL: DEFAULT_FALLBACK_MODEL,
     }
 )
-
-
-def _get_base_url_from_preset(data: dict[str, Any]) -> str | None:
-    """Resolve base URL from provider preset or manual input."""
-    preset_key = data.get(CONF_PROVIDER_PRESET, "custom")
-    preset = PROVIDER_PRESETS.get(preset_key, {})
-    preset_base = preset.get("base_url", "")
-    manual_base = data.get(CONF_BASE_URL, "")
-    # Use manual override if provided, otherwise use preset default
-    if manual_base:
-        return manual_base if manual_base != preset_base else preset_base
-    return preset_base or None
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
@@ -240,11 +228,14 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             ): BooleanSelector(),
         }
 
-        # Only show base_url, api_version, organization for custom or azure
-        if preset_key in ("custom", "azure"):
-            schema[vol.Optional(CONF_BASE_URL)] = str
-            schema[vol.Optional(CONF_API_VERSION)] = str
-            schema[vol.Optional(CONF_ORGANIZATION)] = str
+        # Show base_url for self-hosted or configurable presets (ollama, custom, azure)
+        if preset_key in ("custom", "azure", "ollama"):
+            default_base = PROVIDER_PRESETS.get(preset_key, {}).get("base_url", "")
+            schema[vol.Optional(CONF_BASE_URL, default=default_base)] = str
+            # api_version and organization only for custom/azure
+            if preset_key in ("custom", "azure"):
+                schema[vol.Optional(CONF_API_VERSION)] = str
+                schema[vol.Optional(CONF_ORGANIZATION)] = str
 
         return vol.Schema(schema)
 
@@ -267,6 +258,12 @@ class UniversalLLMConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             options = dict(DEFAULT_OPTIONS)
             options[CONF_CHAT_MODEL] = chat_model
             options[CONF_FALLBACK_MODEL] = fallback_model
+
+            # Ensure base_url is resolved from preset and stored in entry data
+            # so runtime setup doesn't default to OpenAI's endpoint
+            resolved_base_url = _get_base_url_from_preset(user_data)
+            if resolved_base_url:
+                user_data[CONF_BASE_URL] = resolved_base_url
 
             return self.async_create_entry(
                 title=user_data.get(CONF_NAME, DEFAULT_NAME),

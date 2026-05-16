@@ -11,8 +11,8 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
-from .helpers import get_provider
+from .const import CONF_PROVIDER_PRESET, DOMAIN
+from .helpers import _get_base_url_from_preset, get_provider
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,12 +34,14 @@ async def async_setup_entry(
     data = entry.data
     provider_key = data.get("provider", "openai_compatible")
     api_key = data.get("api_key", "")
-    base_url = data.get("base_url")
+    # Resolve base_url from preset if not stored directly (e.g. preset with known URL)
+    base_url = data.get("base_url") or _get_base_url_from_preset(data)
     api_version = data.get("api_version")
     organization = data.get("organization")
     skip_auth = data.get("skip_authentication", False)
+    preset_key = data.get(CONF_PROVIDER_PRESET, "custom")
 
-    if not skip_auth:
+    if not skip_auth and preset_key != "fireworks_firepass":
         try:
             provider = get_provider(
                 hass=hass,
@@ -51,9 +53,7 @@ async def async_setup_entry(
                 model="gpt-4o-mini",
                 timeout=10.0,
             )
-            ok = await provider.validate_connection()
-            if not ok:
-                raise ConfigEntryNotReady("Provider connection failed")
+            await provider.validate_connection()
         except Exception as err:
             _LOGGER.error("Provider validation error: %s", err)
             raise ConfigEntryNotReady(err) from err

@@ -116,6 +116,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 - **160 tests** — Added integration test for Fire Pass preset flow (skip validation, single model selection, subentry creation)
 
+## [0.1.11] - 2026-05-16
+
+### Fixed
+- **Runtime `base_url` resolution for preset providers** — Config entries created with provider presets (e.g. Fireworks, OpenRouter, Ollama) previously stored `base_url` as `None` because the preset's known URL was only used during config flow but never persisted. At runtime, `async_setup_entry()` fell back to OpenAI's default endpoint (`https://api.openai.com/v1`), causing `401 Unauthorized` for non-OpenAI keys:
+  - `config_flow.py` `async_step_model()` now resolves and injects `base_url` into `user_data` before `async_create_entry()`
+  - `helpers.py` `_get_base_url_from_preset()` is now shared between config flow and runtime setup
+  - `__init__.py` `async_setup_entry()` resolves `base_url` from preset at runtime as a fallback, ensuring old entries without persisted `base_url` still work
+- **Fire Pass runtime validation skip** — `async_setup_entry()` now explicitly skips `validate_connection()` for the `fireworks_firepass` preset, preventing the 403 error that occurs when the restricted key hits `/v1/models`
+
+### Testing
+- **163 tests, 94% coverage** — Added tests for `base_url` persistence in config flow entry data and Fire Pass runtime validation skip
+
 ## [Unreleased]
 
 - Native Anthropic provider

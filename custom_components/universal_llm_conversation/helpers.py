@@ -187,3 +187,17 @@ async def async_fetch_models(
             raise HomeAssistantError("model_list_restricted") from err
         _LOGGER.error("Failed to fetch models from %s: %s", base_url, err)
         return []
+
+
+def _get_base_url_from_preset(data: dict[str, Any]) -> str | None:
+    """Resolve base URL from provider preset or manual input."""
+    from .const import CONF_BASE_URL, CONF_PROVIDER_PRESET, PROVIDER_PRESETS
+
+    preset_key = data.get(CONF_PROVIDER_PRESET, "custom")
+    preset = PROVIDER_PRESETS.get(preset_key, {})
+    preset_base = preset.get("base_url", "")
+    manual_base = data.get(CONF_BASE_URL, "")
+    # Use manual override if provided, otherwise use preset default
+    if manual_base:
+        return manual_base if manual_base != preset_base else preset_base
+    return preset_base or None

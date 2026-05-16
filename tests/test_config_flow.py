@@ -208,12 +208,12 @@ async def test_form_with_model_fetch(hass: HomeAssistant) -> None:
 
 @pytest.mark.usefixtures("mock_validate_connection")
 async def test_credentials_fields_conditional(hass: HomeAssistant) -> None:
-    """Test that base_url etc only appear for custom/azure presets."""
+    """Test that base_url etc only appear for custom/azure/ollama presets."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    # Select fireworks (preset with known base_url)
+    # Select fireworks (preset with known base_url, field hidden)
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {
@@ -226,8 +226,7 @@ async def test_credentials_fields_conditional(hass: HomeAssistant) -> None:
     assert result2["type"] is FlowResultType.FORM
     assert result2["step_id"] == "credentials"
 
-    # The form should be returned; we can't directly inspect schema fields,
-    # but we can submit without base_url and it should work
+    # The form should be returned; we can submit without base_url and it works
     with patch(
         "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
         return_value=["accounts/fireworks/models/kimi-k2.6"],
@@ -243,6 +242,59 @@ async def test_credentials_fields_conditional(hass: HomeAssistant) -> None:
 
     assert result3["type"] is FlowResultType.FORM
     assert result3["step_id"] == "model"
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_ollama_preset_shows_editable_base_url(hass: HomeAssistant) -> None:
+    """Test that Ollama preset shows base_url pre-filled with localhost default."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    # Step 1: select ollama preset
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Ollama Test",
+            "provider_preset": "ollama",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    # Step 2: credentials with a custom base_url (e.g. remote server)
+    with patch(
+        "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
+        return_value=["llama3.1", "mistral"],
+    ):
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
+            {
+                "api_key": "ollama-key",
+                "base_url": "http://192.168.1.100:11434/v1",
+                "skip_authentication": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
+
+    # Step 3: select model
+    result4 = await hass.config_entries.flow.async_configure(
+        result3["flow_id"],
+        {
+            "chat_model": "llama3.1",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result4["type"] is FlowResultType.CREATE_ENTRY
+    assert result4["title"] == "Ollama Test"
+    # Verify the custom base_url was stored in entry data
+    assert result4["data"]["base_url"] == "http://192.168.1.100:11434/v1"
 
 
 @pytest.mark.usefixtures("mock_validate_connection")
@@ -499,3 +551,56 @@ async def test_firepass_preset_skips_validation_and_shows_single_model(
     # Verify the model was set correctly in subentries
     conversation_subentry = result4["subentries"][0]
     assert conversation_subentry["data"]["chat_model"] == "accounts/fireworks/routers/kimi-k2p6-turbo"
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_preset_base_url_persisted_in_entry_data(hass: HomeAssistant) -> None:
+    """Test that preset base_url is resolved and stored in config entry data."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    # Step 1: select fireworks preset (has known base_url)
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "name": "Fireworks Test",
+            "provider_preset": "fireworks",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["step_id"] == "credentials"
+
+    # Step 2: credentials (no base_url field for preset)
+    with patch(
+        "custom_components.universal_llm_conversation.config_flow.async_fetch_models",
+        return_value=["accounts/fireworks/models/kimi-k2.6"],
+    ):
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
+            {
+                "api_key": "fp-test-key",
+                "skip_authentication": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result3["type"] is FlowResultType.FORM
+    assert result3["step_id"] == "model"
+
+    # Step 3: select model
+    result4 = await hass.config_entries.flow.async_configure(
+        result3["flow_id"],
+        {
+            "chat_model": "accounts/fireworks/models/kimi-k2.6",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result4["type"] is FlowResultType.CREATE_ENTRY
+    # Verify base_url was resolved from preset and stored in entry data
+    assert result4["data"]["base_url"] == "https://api.fireworks.ai/inference/v1"
