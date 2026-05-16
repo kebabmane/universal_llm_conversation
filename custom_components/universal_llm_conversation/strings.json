@@ -82,6 +82,24 @@
           "description": "Name of the skill to download."
         }
       }
+    },
+    "analyze_image": {
+      "name": "Analyze Image",
+      "description": "Send one or more images to the LLM agent for one-off analysis without starting a conversation.",
+      "fields": {
+        "agent_id": {
+          "name": "Agent",
+          "description": "The Universal LLM Conversation agent to use (its entity_id)."
+        },
+        "images": {
+          "name": "Images",
+          "description": "List of local file paths or media-source URIs to analyze."
+        },
+        "prompt": {
+          "name": "Prompt",
+          "description": "Instructions for the LLM, e.g. 'Describe what you see'."
+        }
+      }
     }
   }
 }

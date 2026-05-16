@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.20] - 2026-05-17
+
+### Added
+- **`analyze_image` service** — One-off vision analysis without conversation state or tools. Supports camera snapshots (`media-source://camera/`), image entities (`media-source://image/`), generic media sources, and local file paths. Vision capability is validated before sending; non-vision models raise a clear `HomeAssistantError`
+
+### Testing
+- **292 tests, 97% coverage** — Direct unit tests added for `async_analyze_images`:
+  - `test_async_analyze_images_happy_path` — local file path, streaming response, verifies `tool_choice=none` and `schema_strict=False`
+  - `test_async_analyze_images_vision_disabled` — raises `HomeAssistantError` when `supports_vision=False`
+  - `test_async_analyze_images_token_limit_warning` — warns and stops on `finish_reason==length`
+  - `test_async_analyze_images_path_not_allowed` — raises `HomeAssistantError` for disallowed paths
+  - `test_async_analyze_images_file_not_found` — raises `ServiceValidationError` for missing files
+  - `test_async_analyze_images_camera_source` — resolves `media-source://camera/` URIs
+  - `test_async_analyze_images_image_source` — resolves `media-source://image/` URIs
+  - `test_async_analyze_images_generic_media_source` — resolves generic `media-source://` URIs via `async_resolve_media`
+
+## [0.1.19] - 2026-05-16
+
+### Added
+- **Image & PDF attachment support** — Chat conversations can now include image and PDF attachments via `UserContent.attachments`:
+  - `supports_vision` capability on `ProviderCapabilities` — vision-enabled models (GPT-4o, Claude, Gemini, Kimi K2.6) are flagged; non-vision models raise a clear `HomeAssistantError` when attachments are present
+  - Automatic image resizing via Pillow (max 1568px) before base64 encoding to stay within API limits
+  - Provider-specific multimodal formatting:
+    - **OpenAI-compatible** — `image_url` data URIs for images; PDFs skipped with warning (Chat Completions API does not support inline PDFs)
+    - **Anthropic** — `image` and `document` content blocks with base64 source
+    - **Gemini** — `Part.from_bytes()` for both images and PDFs
+  - `Pillow>=10.0` added to `manifest.json` requirements
+
+### Testing
+- **284 tests, 97.32% coverage** — 22 new tests for attachment support:
+  - `test_convert_content_to_param_with_image` / `with_pdf` — base64 encoding in chat log conversion
+  - `test_resize_image_if_needed_resizes_oversized` / `passthrough_non_image` / `passthrough_no_pillow` — image downsampling
+  - `test_vision_disabled_raises` — conversation blocked when model lacks vision
+  - Provider-specific attachment conversion tests in `test_openai_compatible_provider.py`, `test_anthropic_provider.py`, and `test_gemini_provider.py`
+
 ## [0.1.18] - 2026-05-16
 
 ### Fixed

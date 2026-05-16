@@ -6,7 +6,9 @@ import base64
 import io
 import json
 import logging
+import mimetypes
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 import voluptuous as vol
@@ -549,3 +551,103 @@ class UniversalLLMBaseEntity(Entity):
             raise
         except Exception as e:
             raise FunctionLoadFailed() from e
+
+    async def async_analyze_images(
+        self,
+        prompt: str,
+        image_sources: list[str],
+    ) -> str:
+        """Run one-off vision analysis without conversation state or tools."""
+        provider = self._get_provider()
+        if not provider.capabilities.supports_vision:
+            from homeassistant.exceptions import HomeAssistantError
+
+            raise HomeAssistantError(
+                f"Model {provider.model} does not support image analysis. "
+                "Configure a vision-capable model for this agent."
+            )
+
+        # Resolve images to (bytes, mime_type)
+        resolved: list[tuple[bytes, str]] = []
+        for source in image_sources:
+            if source.startswith("media-source://camera/"):
+                from homeassistant.components import camera
+
+                entity_id = source.removeprefix("media-source://camera/")
+                snapshot = await camera.async_get_image(self.hass, entity_id)
+                resolved.append((snapshot.content, snapshot.content_type))
+            elif source.startswith("media-source://image/"):
+                from homeassistant.components import image as image_comp
+
+                entity_id = source.removeprefix("media-source://image/")
+                img = await image_comp.async_get_image(self.hass, entity_id)
+                resolved.append((img.content, img.content_type))
+            elif source.startswith("media-source://"):
+                from homeassistant.components.media_source import async_resolve_media
+
+                media = await async_resolve_media(self.hass, source, None)
+                if media.path is None:
+                    from homeassistant.exceptions import ServiceValidationError
+
+                    raise ServiceValidationError(
+                        f"Cannot resolve media source {source}"
+                    )
+                data = await self.hass.async_add_executor_job(
+                    Path(media.path).read_bytes
+                )
+                mime = media.mime_type or "application/octet-stream"
+                resolved.append((data, mime))
+            else:
+                # Local file path
+                if not self.hass.config.is_allowed_path(source):
+                    from homeassistant.exceptions import HomeAssistantError
+
+                    raise HomeAssistantError(f"Path not allowed: {source}")
+                path = Path(source)
+                if not path.exists():
+                    from homeassistant.exceptions import ServiceValidationError
+
+                    raise ServiceValidationError(f"File not found: {source}")
+                data = await self.hass.async_add_executor_job(path.read_bytes)
+                mime = mimetypes.guess_type(source)[0] or "application/octet-stream"
+                resolved.append((data, mime))
+
+        # Build generic attachments
+        attachments: list[dict[str, Any]] = []
+        for data, mime_type in resolved:
+            data = _resize_image_if_needed(data, mime_type)
+            attachments.append({
+                "mime_type": mime_type,
+                "data_base64": base64.b64encode(data).decode(),
+            })
+
+        messages = [
+            {
+                "role": "user",
+                "content": prompt,
+                "attachments": attachments,
+            }
+        ]
+
+        # Reuse agent generation params, filtering by provider capabilities
+        options: dict[str, Any] = {}
+        for key in (CONF_TEMPERATURE, CONF_TOP_P, CONF_MAX_TOKENS):
+            if key in self.subentry.data:
+                options[key] = self.subentry.data[key]
+        options = provider.filter_params(options)
+
+        stream = provider.stream_chat(
+            messages=messages,
+            tools=None,
+            options={**options, "tool_choice": "none", "schema_strict": False},
+        )
+
+        response_text = ""
+        async for chunk in stream:
+            if "content" in chunk:
+                response_text += chunk["content"]
+            if chunk.get("finish_reason") == "length":
+                _LOGGER.warning("Image analysis hit token limit")
+                break
+
+        return response_text.strip()

@@ -882,4 +882,317 @@ class TestEntityHelpers:
                     exposed_entities=[],
                 )
 
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_happy_path(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images returns streamed response for vision-capable provider."""
+        import asyncio
+        from homeassistant.exceptions import HomeAssistantError
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"content": "It is a cat"}
+            yield {"finish_reason": "stop"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-4o"
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        def mock_executor(fn, *args):
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            future.set_result(fn(*args))
+            return future
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass, "async_add_executor_job", side_effect=mock_executor):
+                with patch.object(hass.config, "is_allowed_path", return_value=True):
+                    with patch("custom_components.universal_llm_conversation.entity.Path") as mock_path_cls:
+                        mock_path_inst = MagicMock()
+                        mock_path_inst.exists.return_value = True
+                        mock_path_inst.read_bytes.return_value = b"fake_jpeg"
+                        mock_path_cls.return_value = mock_path_inst
+                        with patch(
+                            "custom_components.universal_llm_conversation.entity.mimetypes.guess_type",
+                            return_value=("image/jpeg", None),
+                        ):
+                            with patch(
+                                "custom_components.universal_llm_conversation.entity._resize_image_if_needed",
+                                return_value=b"fake_jpeg",
+                            ):
+                                result = await agent.async_analyze_images(
+                                    "What is this?", ["/tmp/test.jpg"]
+                                )
+
+        assert result == "It is a cat"
+        call_kwargs = mock_provider.stream_chat.call_args.kwargs
+        assert call_kwargs.get("tools") is None
+        assert call_kwargs["options"]["tool_choice"] == "none"
+        assert call_kwargs["options"]["schema_strict"] is False
+        assert "messages" in call_kwargs
+        assert call_kwargs["messages"][0]["role"] == "user"
+        assert call_kwargs["messages"][0]["content"] == "What is this?"
+        assert len(call_kwargs["messages"][0]["attachments"]) == 1
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_vision_disabled(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images raises when model lacks vision support."""
+        from homeassistant.exceptions import HomeAssistantError
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-3.5-turbo"
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=False)
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with pytest.raises(HomeAssistantError) as exc_info:
+                await agent.async_analyze_images("What is this?", ["/tmp/test.jpg"])
+        assert "does not support image analysis" in str(exc_info.value)
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_token_limit_warning(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images warns and stops when token limit is hit."""
+        import asyncio
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"content": "Partial"}
+            yield {"finish_reason": "length"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-4o"
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        def mock_executor(fn, *args):
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            future.set_result(fn(*args))
+            return future
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass, "async_add_executor_job", side_effect=mock_executor):
+                with patch.object(hass.config, "is_allowed_path", return_value=True):
+                    with patch("custom_components.universal_llm_conversation.entity.Path") as mock_path_cls:
+                        mock_path_inst = MagicMock()
+                        mock_path_inst.exists.return_value = True
+                        mock_path_inst.read_bytes.return_value = b"fake_jpeg"
+                        mock_path_cls.return_value = mock_path_inst
+                        with patch(
+                            "custom_components.universal_llm_conversation.entity.mimetypes.guess_type",
+                            return_value=("image/jpeg", None),
+                        ):
+                            with patch(
+                                "custom_components.universal_llm_conversation.entity._resize_image_if_needed",
+                                return_value=b"fake_jpeg",
+                            ):
+                                with patch("custom_components.universal_llm_conversation.entity._LOGGER") as mock_logger:
+                                    result = await agent.async_analyze_images(
+                                        "What is this?", ["/tmp/test.jpg"]
+                                    )
+
+        assert result == "Partial"
+        mock_logger.warning.assert_called_once()
+        assert "token limit" in mock_logger.warning.call_args[0][0].lower()
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_path_not_allowed(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images raises for disallowed local path."""
+        from homeassistant.exceptions import HomeAssistantError
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        mock_provider = MagicMock()
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass.config, "is_allowed_path", return_value=False):
+                with pytest.raises(HomeAssistantError) as exc_info:
+                    await agent.async_analyze_images("What is this?", ["/etc/passwd"])
+        assert "Path not allowed" in str(exc_info.value)
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_file_not_found(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images raises ServiceValidationError for missing file."""
+        from homeassistant.exceptions import ServiceValidationError
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        mock_provider = MagicMock()
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass.config, "is_allowed_path", return_value=True):
+                with patch("custom_components.universal_llm_conversation.entity.Path") as mock_path_cls:
+                    mock_path_inst = MagicMock()
+                    mock_path_inst.exists.return_value = False
+                    mock_path_cls.return_value = mock_path_inst
+                    with pytest.raises(ServiceValidationError) as exc_info:
+                        await agent.async_analyze_images("What is this?", ["/tmp/missing.jpg"])
+        assert "File not found" in str(exc_info.value)
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_camera_source(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images resolves camera media-source URIs."""
+        import asyncio
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"content": "A camera view"}
+            yield {"finish_reason": "stop"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-4o"
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        def mock_executor(fn, *args):
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            future.set_result(fn(*args))
+            return future
+
+        mock_camera_mod = MagicMock()
+        mock_camera_mod.async_get_image = AsyncMock(
+            return_value=MagicMock(content=b"snapshot", content_type="image/jpeg")
+        )
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass, "async_add_executor_job", side_effect=mock_executor):
+                with patch.dict("sys.modules", {"homeassistant.components.camera": mock_camera_mod}):
+                    with patch(
+                        "custom_components.universal_llm_conversation.entity._resize_image_if_needed",
+                        return_value=b"snapshot",
+                    ):
+                        result = await agent.async_analyze_images(
+                            "Describe the camera",
+                            ["media-source://camera/camera.front_door"],
+                        )
+
+        assert result == "A camera view"
+        mock_camera_mod.async_get_image.assert_awaited_once_with(hass, "camera.front_door")
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_image_source(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images resolves image entity media-source URIs."""
+        import asyncio
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"content": "An image"}
+            yield {"finish_reason": "stop"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-4o"
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        def mock_executor(fn, *args):
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            future.set_result(fn(*args))
+            return future
+
+        mock_image_mod = MagicMock()
+        mock_image_mod.async_get_image = AsyncMock(
+            return_value=MagicMock(content=b"img_data", content_type="image/png")
+        )
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass, "async_add_executor_job", side_effect=mock_executor):
+                with patch.dict("sys.modules", {"homeassistant.components.image": mock_image_mod}):
+                    with patch(
+                        "custom_components.universal_llm_conversation.entity._resize_image_if_needed",
+                        return_value=b"img_data",
+                    ):
+                        result = await agent.async_analyze_images(
+                            "Describe the image",
+                            ["media-source://image/image.test"],
+                        )
+
+        assert result == "An image"
+        mock_image_mod.async_get_image.assert_awaited_once_with(hass, "image.test")
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_generic_media_source(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images resolves generic media-source URIs."""
+        import asyncio
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"content": "A video frame"}
+            yield {"finish_reason": "stop"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-4o"
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        def mock_executor(fn, *args):
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            future.set_result(fn(*args))
+            return future
+
+        mock_media = MagicMock()
+        mock_media.path = "/media/test.jpg"
+        mock_media.mime_type = "image/jpeg"
+
+        mock_media_source_mod = MagicMock()
+        mock_media_source_mod.async_resolve_media = AsyncMock(return_value=mock_media)
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass, "async_add_executor_job", side_effect=mock_executor):
+                with patch.dict("sys.modules", {"homeassistant.components.media_source": mock_media_source_mod}):
+                    with patch("custom_components.universal_llm_conversation.entity.Path") as mock_path_cls:
+                        mock_path_inst = MagicMock()
+                        mock_path_inst.read_bytes.return_value = b"media_bytes"
+                        mock_path_cls.return_value = mock_path_inst
+                        with patch(
+                            "custom_components.universal_llm_conversation.entity._resize_image_if_needed",
+                            return_value=b"media_bytes",
+                        ):
+                            result = await agent.async_analyze_images(
+                                "Describe the media",
+                                ["media-source://media_source/local/test.jpg"],
+                            )
+
+        assert result == "A video frame"
+        mock_media_source_mod.async_resolve_media.assert_awaited_once_with(hass, "media-source://media_source/local/test.jpg", None)
+
 
