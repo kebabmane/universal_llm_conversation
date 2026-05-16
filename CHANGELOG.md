@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.18] - 2026-05-16
+
+### Fixed
+- **`EVENT_CONVERSATION_FINISHED` not fired on dual failure** — Moved event firing before the early error return so the event is always emitted (even when both primary and fallback models fail), ensuring analytics consumers receive `outcome="failed"` and `error_type`
+- **Async generator mock bug in test fixtures** — `mock_provider_stream_always_fail` and `mock_provider_stream_non_retryable` in `conftest.py` were bare `async def` functions with no `yield`, causing Python to return a coroutine object instead of an async generator. Added unreachable `yield {}` to force proper async generator behavior so retry/fallback logic is actually tested
+
+### Testing
+- **259 tests, 97.21% coverage** — Phase 2–4 coverage push completed:
+  - `test_non_conversation_subentry_skipped` — verifies non-conversation subentries do not create conversation entities
+  - `test_fallback_event_payload_on_dual_failure` — verifies event payload when both primary and fallback fail
+  - `test_relative_working_directory` — skill directory resolution for relative `DEFAULT_WORKING_DIRECTORY`
+  - `test_last_content_not_assistant` — empty speech when chat log ends without AssistantContent
+  - `test_adjust_schema_non_dict` / `test_adjust_schema_no_properties` — edge cases in schema adjustment
+  - `test_convert_content_to_param_empty_tool_calls_popped` — empty `tool_calls` list is removed from assistant messages
+  - `test_transform_stream_reasoning_content_hidden` / `visible` — covers `hide_thinking=True` (collects to `reasoning_parts`) and `hide_thinking=False` (yields as content in token mode)
+  - `test_structured_output_formatting` — `_async_handle_chat_log` passes `response_format` when a `vol.Schema` structure is provided
+  - `test_function_not_found_raises` — `FunctionNotFound` raised when stream yields an unknown tool call
+  - `test_fetch_skips_empty_model_id` — model fetch filters out models with empty `id`
+
 ## [0.1.17] - 2026-05-16
 
 ### Added
@@ -249,7 +268,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Native Anthropic provider
-- Native Google Gemini provider
-- Streaming support for non-OpenAI-compatible providers
-- Structured output / JSON schema validation
+- Rename integration to `chathaus` (v1.0)
+- Structured output / JSON schema validation UI
+- Memory / context window management strategies beyond "clear"

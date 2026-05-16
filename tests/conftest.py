@@ -158,6 +158,7 @@ def mock_provider_stream_always_fail() -> Generator[AsyncMock]:
 
     async def fake_stream(*args: object, **kwargs: object) -> AsyncGenerator[dict[str, object], None]:
         raise ConnectionError("Always fails")
+        yield {}  # unreachable — ensures this is an async generator
 
     with patch(
         "custom_components.universal_llm_conversation.providers.openai_compatible.OpenAICompatibleProvider.stream_chat",
@@ -172,6 +173,7 @@ def mock_provider_stream_non_retryable() -> Generator[AsyncMock]:
 
     async def fake_stream(*args: object, **kwargs: object) -> AsyncGenerator[dict[str, object], None]:
         raise ValueError("Bad request parameter")
+        yield {}  # unreachable — ensures this is an async generator
 
     with patch(
         "custom_components.universal_llm_conversation.providers.openai_compatible.OpenAICompatibleProvider.stream_chat",

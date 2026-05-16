@@ -233,6 +233,29 @@ class TestAsyncFetchModels:
 
         assert str(exc_info.value) == "model_list_restricted"
 
+    async def test_fetch_skips_empty_model_id(self) -> None:
+        """Test models with empty id are skipped."""
+        hass = MagicMock()
+
+        mock_model1 = MagicMock()
+        mock_model1.id = "gpt-4o"
+        mock_model2 = MagicMock()
+        mock_model2.id = ""
+
+        async def mock_list(*args, **kwargs):
+            for m in [mock_model1, mock_model2]:
+                yield m
+
+        with patch(
+            "custom_components.universal_llm_conversation.helpers.AsyncOpenAI"
+        ) as mock_client:
+            mock_client.return_value.models.list = MagicMock(return_value=mock_list())
+            hass.async_add_executor_job = AsyncMock(side_effect=lambda target, *args: target(*args))
+
+            result = await async_fetch_models(hass, "key", "http://localhost:1234/v1")
+
+        assert result == ["gpt-4o"]
+
 
 class TestSanitizeEdgeCases:
     """Test sanitize_for_speech edge cases."""

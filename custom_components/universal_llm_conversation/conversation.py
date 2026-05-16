@@ -176,17 +176,6 @@ class UniversalLLMAgentEntity(
             else:
                 outcome = "failed"
 
-        if last_error:
-            intent_response = intent.IntentResponse(language=user_input.language)
-            intent_response.async_set_error(
-                intent.IntentResponseErrorCode.UNKNOWN,
-                f"Sorry, I had a problem talking to the LLM: {last_error}",
-            )
-            return conversation.ConversationResult(
-                response=intent_response,
-                conversation_id=user_input.conversation_id,
-            )
-
         # Build event payload
         event_payload: dict[str, Any] = {
             "user_input": {
@@ -203,6 +192,17 @@ class UniversalLLMAgentEntity(
             event_payload["usage"] = usage
 
         self.hass.bus.async_fire(EVENT_CONVERSATION_FINISHED, event_payload)
+
+        if last_error:
+            intent_response = intent.IntentResponse(language=user_input.language)
+            intent_response.async_set_error(
+                intent.IntentResponseErrorCode.UNKNOWN,
+                f"Sorry, I had a problem talking to the LLM: {last_error}",
+            )
+            return conversation.ConversationResult(
+                response=intent_response,
+                conversation_id=user_input.conversation_id,
+            )
 
         # Build response with sanitization
         intent_response = intent.IntentResponse(language=user_input.language)

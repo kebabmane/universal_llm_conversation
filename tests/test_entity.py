@@ -128,6 +128,19 @@ def test_convert_content_to_param_shorten_tool_call_id() -> None:
     assert len(result[0]["tool_calls"][0]["id"]) < len("call_very_long_id_here")
 
 
+def test_convert_content_to_param_empty_tool_calls_popped() -> None:
+    """Test empty tool_calls list is removed from assistant message."""
+    content = [
+        conversation.AssistantContent(
+            agent_id="agent_1",
+            content="",
+            tool_calls=[],
+        ),
+    ]
+    result = _convert_content_to_param(content)
+    assert "tool_calls" not in result[0]
+
+
 @pytest.mark.usefixtures("mock_validate_connection")
 async def test_entity_device_info_no_fallback(
     hass: HomeAssistant,
@@ -246,6 +259,18 @@ class TestEntityHelpers:
         assert schema["properties"]["items"]["items"]["type"] == "string"
         # The array property itself is required
         assert "items" in schema["required"]
+
+    def test_adjust_schema_non_dict(self) -> None:
+        from custom_components.universal_llm_conversation.entity import _adjust_schema
+        _adjust_schema("not a dict", strict=True)
+        # Should not raise
+
+    def test_adjust_schema_no_properties(self) -> None:
+        from custom_components.universal_llm_conversation.entity import _adjust_schema
+        schema = {"type": "object"}
+        _adjust_schema(schema, strict=True)
+        assert schema.get("strict") is True
+        assert schema.get("additionalProperties") is False
 
     @pytest.mark.usefixtures("mock_validate_connection")
     async def test_should_run_in_background(self, hass: HomeAssistant, mock_config_entry: object) -> None:
@@ -625,5 +650,160 @@ class TestEntityHelpers:
         assert len(content_deltas) == 2
         assert content_deltas[0]["content"] == "Hello"
         assert content_deltas[1]["content"] == " world"
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_reasoning_content_hidden(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test reasoning_content is collected but not yielded when hide_thinking=True."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "Hello"}
+            yield {"reasoning_content": "thinking..."}
+            yield {"finish_reason": "stop"}
+
+        reasoning_parts = []
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=True, reasoning_parts=reasoning_parts, usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 1
+        assert content_deltas[0]["content"] == "Hello"
+        assert reasoning_parts == ["thinking..."]
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_transform_stream_reasoning_content_visible(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test reasoning_content is yielded when hide_thinking=False in token mode."""
+        subentry = next(iter(mock_config_entry.subentries.values()))
+        hass.config_entries.async_update_subentry(
+            mock_config_entry,
+            subentry,
+            data={**subentry.data, "tts_streaming_mode": "token"},
+        )
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "Hello"}
+            yield {"reasoning_content": "thinking..."}
+            yield {"finish_reason": "stop"}
+
+        reasoning_parts = []
+        results = []
+        async for delta in agent._transform_stream(
+            MagicMock(), fake_stream(), hide_thinking=False, reasoning_parts=reasoning_parts, usage_accumulator={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        ):
+            results.append(delta)
+
+        content_deltas = [d for d in results if "content" in d]
+        assert len(content_deltas) == 2
+        assert content_deltas[0]["content"] == "Hello"
+        assert content_deltas[1]["content"] == "thinking..."
+        assert reasoning_parts == []
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_structured_output_formatting(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test _async_handle_chat_log passes response_format when structure is provided."""
+        import voluptuous as vol
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"content": "hi"}
+            yield {"finish_reason": "stop"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-4"
+        mock_provider.supports_tools = False
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            chat_log = MagicMock()
+            chat_log.content = [
+                conversation.SystemContent(content="sys"),
+                conversation.UserContent(content="hi"),
+            ]
+
+            async def mock_delta_stream(entity_id, stream):
+                async for _ in stream:
+                    pass
+                return
+                yield  # force async generator
+
+            chat_log.async_add_delta_content_stream = mock_delta_stream
+            chat_log.unresponded_tool_results = False
+
+            await agent._async_handle_chat_log(
+                chat_log,
+                function_tools=[],
+                exposed_entities=[],
+                structure=vol.Schema({"type": "object", "properties": {"name": {"type": "string"}}}),
+                structure_name="test_schema",
+            )
+
+        call_kwargs = mock_provider.stream_chat.call_args.kwargs
+        assert "options" in call_kwargs
+        assert "response_format" in call_kwargs["options"]
+        assert call_kwargs["options"]["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_function_not_found_raises(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test _async_handle_chat_log raises FunctionNotFound for unknown tool."""
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"role": "assistant"}
+            yield {"tool_calls": [{"id": "call_1", "tool_name": "unknown_tool", "tool_args": {}}]}
+            yield {"finish_reason": "stop"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "gpt-4"
+        mock_provider.supports_tools = True
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            chat_log = MagicMock()
+            chat_log.content = [
+                conversation.SystemContent(content="sys"),
+                conversation.UserContent(content="hi"),
+            ]
+
+            async def mock_delta_stream(entity_id, stream):
+                async for chunk in stream:
+                    if isinstance(chunk, dict) and chunk.get("tool_calls"):
+                        yield conversation.AssistantContent(
+                            agent_id="agent",
+                            content="",
+                            tool_calls=[llm.ToolInput(id="call_1", tool_name="unknown_tool", tool_args={}, external=True)],
+                        )
+                    else:
+                        yield conversation.AssistantContent(agent_id="agent", content="hi")
+                return
+                yield  # force async generator
+
+            chat_log.async_add_delta_content_stream = mock_delta_stream
+            chat_log.unresponded_tool_results = False
+
+            from custom_components.universal_llm_conversation.exceptions import FunctionNotFound
+
+            with pytest.raises(FunctionNotFound):
+                await agent._async_handle_chat_log(
+                    chat_log,
+                    function_tools=[{"spec": {"name": "known_tool"}}],
+                    exposed_entities=[],
+                )
 
 

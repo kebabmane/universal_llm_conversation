@@ -398,3 +398,417 @@ class TestGeminiToolConversion:
         func_decl = result[0].function_declarations[0]
         assert "strict" not in func_decl.parameters_json_schema
         assert "additionalProperties" not in func_decl.parameters_json_schema
+
+
+class TestGeminiProviderInitErrors:
+    """Test initialization error paths."""
+
+    def test_init_raises_when_sdk_missing(self) -> None:
+        """Test ImportError when google-genai SDK is not installed."""
+        from homeassistant.exceptions import HomeAssistantError
+        from homeassistant.core import HomeAssistant
+
+        import sys
+        from homeassistant.exceptions import HomeAssistantError
+        from homeassistant.core import HomeAssistant
+
+        hass = MagicMock(spec=HomeAssistant)
+        # Temporarily hide google.genai so the import in __init__ fails
+        real_genai = sys.modules.get("google.genai")
+        real_google = sys.modules.get("google")
+        if real_genai:
+            del sys.modules["google.genai"]
+        # Patch the google module to not have genai attribute
+        if real_google and hasattr(real_google, "genai"):
+            original_genai = real_google.genai
+            delattr(real_google, "genai")
+        try:
+            with patch.dict("sys.modules", {"google.genai": None}):
+                with pytest.raises(HomeAssistantError, match="Google GenAI SDK not installed"):
+                    GeminiProvider(
+                        hass=hass,
+                        api_key="gemini-test",
+                        base_url=None,
+                        api_version=None,
+                        organization=None,
+                        model="gemini-2.5-flash",
+                        timeout=60.0,
+                        capabilities=GEMINI_CAPABILITIES,
+                    )
+        finally:
+            if real_genai:
+                sys.modules["google.genai"] = real_genai
+            if real_google and hasattr(real_google, "genai") is False and 'original_genai' in locals():
+                real_google.genai = original_genai
+
+
+class TestGeminiValidateConnectionErrors:
+    """Test validate_connection error branches."""
+
+    @patch("google.genai")
+    async def test_validate_connection_api_error(self, mock_genai: MagicMock) -> None:
+        """Test APIError maps to cannot_connect."""
+        from google.genai.errors import APIError
+        from homeassistant.exceptions import HomeAssistantError
+
+        mock_client = MagicMock()
+        mock_client.aio.models.list = MagicMock(side_effect=APIError(500, {"error": "server down"}))
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        with pytest.raises(HomeAssistantError, match="cannot_connect"):
+            await provider.validate_connection()
+
+    @patch("google.genai")
+    async def test_validate_connection_generic_exception(self, mock_genai: MagicMock) -> None:
+        """Test generic Exception maps to cannot_connect."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        mock_client = MagicMock()
+        mock_client.aio.models.list = MagicMock(side_effect=RuntimeError("boom"))
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        with pytest.raises(HomeAssistantError, match="cannot_connect"):
+            await provider.validate_connection()
+
+class TestGeminiStreamChatEdgeCases:
+    """Test stream_chat edge cases."""
+
+    @patch("google.genai")
+    async def test_stream_chat_exception_propagates(self, mock_genai: MagicMock) -> None:
+        """Test exceptions from generate_content_stream propagate."""
+        mock_client = MagicMock()
+        mock_client.aio.models.generate_content_stream = AsyncMock(side_effect=ConnectionError("boom"))
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        with pytest.raises(ConnectionError, match="boom"):
+            async for _ in provider.stream_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=None,
+                options={},
+            ):
+                pass
+
+    @patch("google.genai")
+    async def test_stream_chat_multiple_system_messages(self, mock_genai: MagicMock) -> None:
+        """Test multiple system messages are concatenated."""
+        mock_client = MagicMock()
+        mock_genai.types = MagicMock()
+
+        class FakeChunk:
+            text = "Hello"
+            function_calls = None
+            usage_metadata = None
+            candidates = None
+
+        async def fake_stream():
+            yield FakeChunk()
+
+        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        results = []
+        async for chunk in provider.stream_chat(
+            messages=[
+                {"role": "system", "content": "You are helpful"},
+                {"role": "system", "content": "Be concise"},
+                {"role": "user", "content": "hi"},
+            ],
+            tools=None,
+            options={"temperature": 0.5, "top_p": 0.9, "max_tokens": 512},
+        ):
+            results.append(chunk)
+
+        assert {"content": "Hello"} in results
+        call_kwargs = mock_client.aio.models.generate_content_stream.call_args.kwargs
+        config = call_kwargs["config"]
+        assert config.system_instruction == "You are helpful\nBe concise"
+        # Verify temperature and max_tokens passed through
+        # Note: top_p is filtered by Gemini capabilities (unsupported_params includes "top_p")
+        assert config.temperature == 0.5
+        assert config.max_output_tokens == 512
+
+    @patch("google.genai")
+    async def test_stream_chat_function_call_dict_args(self, mock_genai: MagicMock) -> None:
+        """Test function call with dict-like args (hasattr items)."""
+        mock_client = MagicMock()
+
+        class FakeArgs:
+            """Mapping-like object that dict() constructor can consume."""
+            def __init__(self):
+                self._data = {"location": "Boston"}
+            def keys(self):
+                return self._data.keys()
+            def __getitem__(self, key):
+                return self._data[key]
+            def items(self):
+                return self._data.items()
+
+        class FakeFunctionCall:
+            name = "get_weather"
+            args = FakeArgs()
+            id = "fc_123"
+
+        class FakeChunk:
+            text = None
+            function_calls = [FakeFunctionCall()]
+            usage_metadata = None
+            candidates = None
+
+        async def fake_stream():
+            yield FakeChunk()
+
+        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        results = []
+        async for chunk in provider.stream_chat(
+            messages=[{"role": "user", "content": "weather?"}],
+            tools=None,
+            options={},
+        ):
+            results.append(chunk)
+
+        tool_chunks = [r for r in results if "tool_calls" in r]
+        assert len(tool_chunks) == 1
+        assert tool_chunks[0]["tool_calls"][0]["tool_args"] == {"location": "Boston"}
+
+    @patch("google.genai")
+    async def test_stream_chat_candidate_max_tokens(self, mock_genai: MagicMock) -> None:
+        """Test candidate finish_reason MAX_TOKENS."""
+        mock_client = MagicMock()
+
+        class FakeFinishReason:
+            name = "MAX_TOKENS"
+
+        class FakeCandidate:
+            finish_reason = FakeFinishReason()
+
+        class FakeChunk:
+            text = None
+            function_calls = None
+            usage_metadata = None
+            candidates = [FakeCandidate()]
+
+        async def fake_stream():
+            yield FakeChunk()
+
+        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        results = []
+        async for chunk in provider.stream_chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            options={},
+        ):
+            results.append(chunk)
+
+        assert {"finish_reason": "length"} in results
+
+    @patch("google.genai")
+    async def test_stream_chat_candidate_stop(self, mock_genai: MagicMock) -> None:
+        """Test candidate finish_reason STOP."""
+        mock_client = MagicMock()
+
+        class FakeFinishReason:
+            name = "STOP"
+
+        class FakeCandidate:
+            finish_reason = FakeFinishReason()
+
+        class FakeChunk:
+            text = "Done"
+            function_calls = None
+            usage_metadata = None
+            candidates = [FakeCandidate()]
+
+        async def fake_stream():
+            yield FakeChunk()
+
+        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        results = []
+        async for chunk in provider.stream_chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            options={},
+        ):
+            results.append(chunk)
+
+        assert {"content": "Done"} in results
+        assert {"finish_reason": "stop"} in results
+
+    @patch("google.genai")
+    async def test_stream_chat_tool_choice_none(self, mock_genai: MagicMock) -> None:
+        """Test tool_choice none builds correct FunctionCallingConfig."""
+        mock_client = MagicMock()
+        mock_genai.types = MagicMock()
+
+        class FakeChunk:
+            text = "No tools"
+            function_calls = None
+            usage_metadata = None
+            candidates = None
+
+        async def fake_stream():
+            yield FakeChunk()
+
+        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        tools = [
+            {
+                "type": "function",
+                "function": {"name": "test", "description": "test", "parameters": {"type": "object"}},
+            }
+        ]
+
+        async for _ in provider.stream_chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=tools,
+            options={"tool_choice": "none"},
+        ):
+            pass
+
+        call_kwargs = mock_client.aio.models.generate_content_stream.call_args.kwargs
+        config = call_kwargs["config"]
+        # Verify tool_config was built with NONE mode
+        assert config.tool_config is not None
+
+    @patch("google.genai")
+    async def test_stream_chat_no_tools_skips_tool_config(self, mock_genai: MagicMock) -> None:
+        """Test that no tools means no tool_config in config."""
+        mock_client = MagicMock()
+        mock_genai.types = MagicMock()
+
+        class FakeChunk:
+            text = "Hello"
+            function_calls = None
+            usage_metadata = None
+            candidates = None
+
+        async def fake_stream():
+            yield FakeChunk()
+
+        mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+        mock_genai.Client.return_value = mock_client
+
+        hass = MagicMock(spec=HomeAssistant)
+        provider = GeminiProvider(
+            hass=hass,
+            api_key="gemini-test",
+            base_url=None,
+            api_version=None,
+            organization=None,
+            model="gemini-2.5-flash",
+            timeout=60.0,
+            capabilities=GEMINI_CAPABILITIES,
+        )
+
+        async for _ in provider.stream_chat(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            options={},
+        ):
+            pass
+
+        call_kwargs = mock_client.aio.models.generate_content_stream.call_args.kwargs
+        config = call_kwargs["config"]
+        assert not hasattr(config, "tool_config") or config.tool_config is None

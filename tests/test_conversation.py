@@ -205,6 +205,8 @@ async def test_fallback_event_includes_outcome(
         agent_id=mock_config_entry.entry_id,
     )
 
+    await hass.async_block_till_done()
+
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
     assert len(events) == 1
     assert events[0].data["outcome"] == "fallback_used"
@@ -236,6 +238,8 @@ async def test_conversation_event_includes_usage(
         Context(),
         agent_id=mock_config_entry.entry_id,
     )
+
+    await hass.async_block_till_done()
 
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
     assert len(events) == 1
@@ -350,3 +354,131 @@ def test_is_retryable_error_classification() -> None:
     # ImportError branch when openai SDK is not available
     with patch("builtins.__import__", side_effect=ImportError("no openai")):
         assert _is_retryable_error(ValueError("whatever")) is False
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_non_conversation_subentry_skipped(
+    hass: HomeAssistant,
+) -> None:
+    """Test that non-conversation subentries do not create conversation entities."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from homeassistant.config_entries import ConfigSubentryData
+    from custom_components.universal_llm_conversation.config_flow import DEFAULT_OPTIONS
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Universal LLM",
+        data={
+            "api_key": "test-api-key",
+            "provider_preset": "custom",
+            "base_url": "http://localhost:1234/v1",
+            "api_version": None,
+            "organization": None,
+            "skip_authentication": False,
+        },
+        version=1,
+        subentries_data=[
+            ConfigSubentryData(
+                data=dict(DEFAULT_OPTIONS),
+                subentry_type="other_type",
+                title="Other Subentry",
+                unique_id=None,
+            ),
+        ],
+    )
+    entry.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Only the built-in Home Assistant conversation entity should exist
+    states = hass.states.async_all("conversation")
+    assert all("home_assistant" in s.entity_id for s in states)
+
+
+@pytest.mark.usefixtures("mock_validate_connection", "mock_provider_stream_always_fail")
+async def test_fallback_event_payload_on_dual_failure(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test EVENT_CONVERSATION_FINISHED payload when both models fail."""
+    from custom_components.universal_llm_conversation.const import EVENT_CONVERSATION_FINISHED
+
+    subentry = next(iter(mock_config_entry.subentries.values()))
+    hass.config_entries.async_update_subentry(
+        mock_config_entry,
+        subentry,
+        data={**subentry.data, "fallback_model": "gpt-4o-mini"},
+    )
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    events = []
+
+    def event_listener(event):
+        events.append(event)
+
+    hass.bus.async_listen(EVENT_CONVERSATION_FINISHED, event_listener)
+
+    result = await conversation.async_converse(
+        hass,
+        "hello",
+        None,
+        Context(),
+        agent_id=mock_config_entry.entry_id,
+    )
+
+    await hass.async_block_till_done()
+
+    assert result.response.response_type == intent.IntentResponseType.ERROR
+    assert len(events) == 1
+    assert events[0].data["outcome"] == "failed"
+    assert events[0].data["error_type"] == "fallback_ConnectionError"
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_relative_working_directory(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test skill directory resolution when working dir is relative."""
+    from pathlib import Path
+    from unittest.mock import patch
+
+    with patch(
+        "custom_components.universal_llm_conversation.conversation.DEFAULT_WORKING_DIRECTORY",
+        "relative_dir",
+    ):
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+        agent = conversation.get_agent_manager(hass).async_get_agent(
+            mock_config_entry.entry_id
+        )
+        assert agent is not None
+        expected = Path(hass.config.config_dir) / "relative_dir" / "skills"
+        assert str(expected) in str(agent.skill_manager.user_skills_dir)
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_last_content_not_assistant(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test speech is empty when last content is not AssistantContent."""
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+    with patch.object(agent, "_async_handle_chat_log", return_value={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}):
+        result = await conversation.async_converse(
+            hass,
+            "hello",
+            None,
+            Context(),
+            agent_id=mock_config_entry.entry_id,
+        )
+
+    assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
+    assert result.response.speech["plain"]["speech"] == ""
