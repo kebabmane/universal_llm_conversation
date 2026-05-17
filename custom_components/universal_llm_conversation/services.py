@@ -29,6 +29,7 @@ SERVICE_ANALYZE_IMAGE_SCHEMA = vol.Schema(
         vol.Required("agent_id"): cv.string,
         vol.Required("images"): vol.All(cv.ensure_list, [cv.string], vol.Length(min=1)),
         vol.Optional("prompt", default="Describe this image."): cv.string,
+        vol.Optional("max_tokens", default=2000): vol.All(cv.positive_int, vol.Range(min=1, max=8192)),
     }
 )
 
@@ -57,6 +58,7 @@ async def async_setup_services(hass: HomeAssistant, config: Any) -> None:
         agent_id = call.data["agent_id"]
         images = call.data["images"]
         prompt = call.data["prompt"]
+        max_tokens = call.data.get("max_tokens")
 
         agent = conversation.async_get_agent(hass, agent_id)
         if agent is None:
@@ -67,7 +69,7 @@ async def async_setup_services(hass: HomeAssistant, config: Any) -> None:
             )
 
         analysis = await agent.async_analyze_images(
-            prompt=prompt, image_sources=images
+            prompt=prompt, image_sources=images, max_tokens=max_tokens
         )
 
         return {"analysis": analysis}

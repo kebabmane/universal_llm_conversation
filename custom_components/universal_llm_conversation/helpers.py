@@ -122,8 +122,15 @@ def _resolve_capabilities(model: str, provider_key: str | None = None) -> Any:
         return ANTHROPIC_CAPABILITIES
     if provider_key == "gemini":
         return GEMINI_CAPABILITIES
+    model_lower = model.lower()
     for pattern, caps in MODEL_CAPABILITY_OVERRIDES.items():
-        if pattern in model.lower() or model.lower().startswith(pattern.replace("-", "")):
+        # Exact substring or prefix match
+        if pattern in model_lower or model_lower.startswith(pattern.replace("-", "")):
+            return caps
+        # Normalized match: strip dots so "kimi-k2.6" also matches "kimi-k2p6" variants
+        normalized_pattern = pattern.replace(".", "").replace("-", "")
+        normalized_model = model_lower.replace(".", "").replace("-", "")
+        if normalized_pattern in normalized_model:
             return caps
     return OPENAI_COMPATIBLE_CAPABILITIES
 

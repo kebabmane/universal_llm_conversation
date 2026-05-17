@@ -556,6 +556,7 @@ class UniversalLLMBaseEntity(Entity):
         self,
         prompt: str,
         image_sources: list[str],
+        max_tokens: int | None = None,
     ) -> str:
         """Run one-off vision analysis without conversation state or tools."""
         provider = self._get_provider()
@@ -634,6 +635,9 @@ class UniversalLLMBaseEntity(Entity):
         for key in (CONF_TEMPERATURE, CONF_TOP_P, CONF_MAX_TOKENS):
             if key in self.subentry.data:
                 options[key] = self.subentry.data[key]
+        # Override max_tokens for vision analysis when service provides it
+        if max_tokens is not None:
+            options[CONF_MAX_TOKENS] = max_tokens
         options = provider.filter_params(options)
 
         stream = provider.stream_chat(
@@ -646,6 +650,8 @@ class UniversalLLMBaseEntity(Entity):
         async for chunk in stream:
             if "content" in chunk:
                 response_text += chunk["content"]
+            if "reasoning_content" in chunk:
+                response_text += chunk["reasoning_content"]
             if chunk.get("finish_reason") == "length":
                 _LOGGER.warning("Image analysis hit token limit")
                 break

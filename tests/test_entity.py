@@ -926,7 +926,7 @@ class TestEntityHelpers:
                                 return_value=b"fake_jpeg",
                             ):
                                 result = await agent.async_analyze_images(
-                                    "What is this?", ["/tmp/test.jpg"]
+                                    "What is this?", ["/tmp/test.jpg"], max_tokens=3000
                                 )
 
         assert result == "It is a cat"
@@ -938,6 +938,55 @@ class TestEntityHelpers:
         assert call_kwargs["messages"][0]["role"] == "user"
         assert call_kwargs["messages"][0]["content"] == "What is this?"
         assert len(call_kwargs["messages"][0]["attachments"]) == 1
+        assert call_kwargs["options"]["max_tokens"] == 3000
+
+    @pytest.mark.usefixtures("mock_validate_connection")
+    async def test_async_analyze_images_reasoning_content(self, hass: HomeAssistant, mock_config_entry: object) -> None:
+        """Test async_analyze_images collects reasoning_content chunks (e.g. Kimi)."""
+        import asyncio
+        from custom_components.universal_llm_conversation.providers import ProviderCapabilities
+
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        agent = conversation.get_agent_manager(hass).async_get_agent(mock_config_entry.entry_id)
+
+        async def fake_stream():
+            yield {"reasoning_content": "It is a cat"}
+            yield {"finish_reason": "stop"}
+
+        mock_provider = MagicMock()
+        mock_provider.model = "kimi-k2p6"
+        mock_provider.capabilities = ProviderCapabilities(supports_vision=True)
+        mock_provider.filter_params = lambda p: p
+        mock_provider.stream_chat = MagicMock(return_value=fake_stream())
+
+        def mock_executor(fn, *args):
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            future.set_result(fn(*args))
+            return future
+
+        with patch.object(agent, "_get_provider", return_value=mock_provider):
+            with patch.object(hass, "async_add_executor_job", side_effect=mock_executor):
+                with patch.object(hass.config, "is_allowed_path", return_value=True):
+                    with patch("custom_components.universal_llm_conversation.entity.Path") as mock_path_cls:
+                        mock_path_inst = MagicMock()
+                        mock_path_inst.exists.return_value = True
+                        mock_path_inst.read_bytes.return_value = b"fake_jpeg"
+                        mock_path_cls.return_value = mock_path_inst
+                        with patch(
+                            "custom_components.universal_llm_conversation.entity.mimetypes.guess_type",
+                            return_value=("image/jpeg", None),
+                        ):
+                            with patch(
+                                "custom_components.universal_llm_conversation.entity._resize_image_if_needed",
+                                return_value=b"fake_jpeg",
+                            ):
+                                result = await agent.async_analyze_images(
+                                    "What is this?", ["/tmp/test.jpg"]
+                                )
+
+        assert result == "It is a cat"
 
     @pytest.mark.usefixtures("mock_validate_connection")
     async def test_async_analyze_images_vision_disabled(self, hass: HomeAssistant, mock_config_entry: object) -> None:

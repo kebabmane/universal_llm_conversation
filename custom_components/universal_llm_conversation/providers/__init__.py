@@ -115,6 +115,22 @@ MODEL_CAPABILITY_OVERRIDES: dict[str, ProviderCapabilities] = {
         param_names={"max_tokens": "max_completion_tokens"},
         unsupported_params={"temperature", "top_p"},
     ),
+    "kimi-k2p6": ProviderCapabilities(
+        supports_streaming=True,
+        supports_tools=True,
+        supports_tool_choice=True,
+        supports_temperature=False,
+        supports_top_p=False,
+        supports_max_tokens=False,
+        supports_max_completion_tokens=True,
+        supports_reasoning_effort=False,
+        supports_service_tier=False,
+        supports_strict_schemas=False,
+        supports_thinking_content=True,
+        supports_vision=True,
+        param_names={"max_tokens": "max_completion_tokens"},
+        unsupported_params={"temperature", "top_p"},
+    ),
     # Anthropic models via OpenRouter / OpenAI-compatible
     "claude-": ProviderCapabilities(
         supports_streaming=True,

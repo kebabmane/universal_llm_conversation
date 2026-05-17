@@ -107,7 +107,7 @@ async def test_analyze_image_service_success(
 
     with patch.object(
         agent, "async_analyze_images", new=AsyncMock(return_value="There is a cat.")
-    ):
+    ) as mock_analyze:
         result = await hass.services.async_call(
             DOMAIN,
             "analyze_image",
@@ -121,6 +121,44 @@ async def test_analyze_image_service_success(
         )
 
     assert result == {"analysis": "There is a cat."}
+    # Verify default max_tokens=2000 is passed through
+    mock_analyze.assert_awaited_once()
+    assert mock_analyze.call_args.kwargs.get("max_tokens") == 2000
+
+
+@pytest.mark.usefixtures("mock_validate_connection")
+async def test_analyze_image_service_with_custom_max_tokens(
+    hass: HomeAssistant,
+    mock_config_entry: object,
+) -> None:
+    """Test analyze_image service accepts custom max_tokens."""
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    agent = conversation.get_agent_manager(hass).async_get_agent(
+        mock_config_entry.entry_id
+    )
+    assert agent is not None
+
+    with patch.object(
+        agent, "async_analyze_images", new=AsyncMock(return_value="Detailed analysis.")
+    ) as mock_analyze:
+        result = await hass.services.async_call(
+            DOMAIN,
+            "analyze_image",
+            {
+                "agent_id": mock_config_entry.entry_id,
+                "images": ["/config/www/test.jpg"],
+                "prompt": "Describe everything you see",
+                "max_tokens": 4000,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert result == {"analysis": "Detailed analysis."}
+    mock_analyze.assert_awaited_once()
+    assert mock_analyze.call_args.kwargs.get("max_tokens") == 4000
 
 
 @pytest.mark.usefixtures("mock_validate_connection")

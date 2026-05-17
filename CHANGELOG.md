@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.21] - 2026-05-17
+
+### Fixed
+- **Missing `kimi-k2p6` model capability override** — Fireworks model ID `accounts/fireworks/routers/kimi-k2p6-turbo` was not recognized as vision-capable because the existing override key was `"kimi-k2.6"` (with dot) while the model string contains `"kimi-k2p6"` (with "p"). Added a dedicated `MODEL_CAPABILITY_OVERRIDES` entry for `"kimi-k2p6"` with identical capabilities to `"kimi-k2.6"` (vision, tools, reasoning, `max_completion_tokens`). Also updated `_resolve_capabilities()` to check normalized model strings (stripping dots and dashes) so both dotted and undotted variants are caught
+- **`analyze_image` service hardcoded low `max_tokens`** — Vision analysis tasks need significantly more tokens than conversational tasks (default agent config was 500). Added `max_tokens` as an optional service parameter (default 2000, range 1-8192) that overrides the agent's configured `CONF_MAX_TOKENS` when calling `async_analyze_images()`
+- **`async_analyze_images()` returned empty string for reasoning-only models** — Fireworks/Kimi K2.6T streams image analysis in `delta.reasoning_content` chunks instead of `delta.content`. The existing method only accumulated `chunk["content"]`, building an empty string. Now collects both `content` and `reasoning_content` chunks unconditionally
+
+### Testing
+- **297 tests, 97% coverage** — Added 5 new tests for the three fixes:
+  - `test_resolve_capabilities_kimi_k2p6` — verifies `"accounts/fireworks/routers/kimi-k2p6-turbo"` resolves to vision-capable capabilities
+  - `test_resolve_capabilities_kimi_k2_6_dot_variant` — verifies dotted variant still matches
+  - `test_kimi_k2p6_has_correct_capabilities` — verifies override entry capabilities
+  - `test_analyze_image_service_with_custom_max_tokens` — verifies `max_tokens=4000` override is passed through
+  - `test_async_analyze_images_reasoning_content` — verifies `reasoning_content` chunks are collected when no `content` is present
+
 ## [0.1.20] - 2026-05-17
 
 ### Added

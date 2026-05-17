@@ -98,6 +98,10 @@
         "prompt": {
           "name": "Prompt",
           "description": "Instructions for the LLM, e.g. 'Describe what you see'."
+        },
+        "max_tokens": {
+          "name": "Max Tokens",
+          "description": "Maximum tokens for the analysis response. Vision tasks typically need 1000-4000."
         }
       }
     }

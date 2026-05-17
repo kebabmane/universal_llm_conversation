@@ -148,6 +148,30 @@ class TestKimiOverrides:
         caps = MODEL_CAPABILITY_OVERRIDES["kimi-k2.5"]
         assert caps.supports_vision is True
 
+    def test_kimi_k2p6_has_correct_capabilities(self) -> None:
+        caps = MODEL_CAPABILITY_OVERRIDES["kimi-k2p6"]
+        assert caps.supports_max_completion_tokens is True
+        assert caps.supports_max_tokens is False
+        assert caps.supports_temperature is False
+        assert caps.supports_top_p is False
+        assert caps.supports_strict_schemas is False
+        assert caps.supports_thinking_content is True
+        assert caps.supports_vision is True
+        assert caps.param_names["max_tokens"] == "max_completion_tokens"
+
+    def test_resolve_capabilities_kimi_k2p6(self) -> None:
+        from custom_components.universal_llm_conversation.helpers import _resolve_capabilities
+        caps = _resolve_capabilities("accounts/fireworks/routers/kimi-k2p6-turbo")
+        assert caps.supports_vision is True
+        assert caps.supports_thinking_content is True
+        assert caps.supports_max_completion_tokens is True
+
+    def test_resolve_capabilities_kimi_k2_6_dot_variant(self) -> None:
+        from custom_components.universal_llm_conversation.helpers import _resolve_capabilities
+        caps = _resolve_capabilities("kimi-k2.6")
+        assert caps.supports_vision is True
+        assert caps.supports_thinking_content is True
+
     def test_gpt_4o_supports_vision(self) -> None:
         caps = MODEL_CAPABILITY_OVERRIDES["gpt-4o"]
         assert caps.supports_vision is True
