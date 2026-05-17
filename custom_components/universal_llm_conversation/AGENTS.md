@@ -8,8 +8,8 @@ A provider-agnostic Home Assistant conversation agent that replaces `extended_op
 
 ## Provider Support
 - **OpenAI Compatible** — Fireworks, Firepass, Ollama, OpenRouter, vLLM, LocalAI, LiteLLM proxy, Groq, Together, etc. (default)
-- **Anthropic (Claude)** — Native API (planned)
-- **Google Gemini** — Native API (planned)
+- **Anthropic (Claude)** — Native API with streaming, tool calls, thinking content, and vision
+- **Google Gemini** — Native API with streaming, function calling, and vision
 
 ## Key Architecture Decisions
 
@@ -31,6 +31,9 @@ Default `strict=False` for broader non-OpenAI compatibility. Toggle per agent fo
 ### Thinking Content
 Default `hide_thinking=True`. Kimi K2.6 `reasoning_content` is captured but not emitted to TTS. Can be disabled to pass thinking through (e.g., for UI display).
 
+### Image & Vision Support
+Images and PDFs flow through `UserContent.attachments` for chat conversations, and through the dedicated `analyze_image` service for one-off analysis. The `supports_vision` capability on `ProviderCapabilities` determines whether a model accepts multimodal input. Images are resized to 1568px max dimension via Pillow before base64 encoding. Provider-specific formatting: OpenAI-compatible uses `image_url` data URIs; Anthropic uses `image`/`document` content blocks; Gemini uses `Part.from_bytes()`. PDFs are skipped with a warning on OpenAI Chat Completions but supported by Anthropic and Gemini.
+
 ## File Map
 
 | File | Role |
@@ -43,10 +46,12 @@ Default `hide_thinking=True`. Kimi K2.6 `reasoning_content` is captured but not 
 | `entity.py` | Base LLM entity, streaming transformation, tool execution |
 | `helpers.py` | Exposed entities, provider factory, speech sanitizer |
 | `providers/base.py` | Abstract provider class |
-| `providers/openai_compatible.py` | OpenAI/Azure client with capability filtering |
+| `providers/openai_compatible.py` | OpenAI/Azure client with capability filtering, image attachment conversion |
+| `providers/anthropic.py` | Native Anthropic client with vision, thinking, and document support |
+| `providers/gemini.py` | Native Gemini client with vision and function calling |
 | `functions.py` | Native function registry (execute_service, template, script, composite, bash, read_file) |
 | `skills.py` | Skill discovery, download, reload |
-| `services.py` | HA services for skill management |
+| `services.py` | HA services for skill management and `analyze_image` |
 | `exceptions.py` | Custom exceptions |
 | `strings.json` | UI labels |
 
@@ -58,6 +63,9 @@ Default `hide_thinking=True`. Kimi K2.6 `reasoning_content` is captured but not 
 5. Verify tool calls work with `schema_strict=False`.
 6. Verify voice output has no leaked reasoning or tool syntax.
 7. Set fallback model and block primary endpoint to test fallback.
+8. Test `analyze_image` service with camera snapshots, local files, and media sources.
+9. Verify vision models accept images; non-vision models reject with clear error.
+10. Verify `max_tokens` override in `analyze_image` service is applied.
 
 ## Release Process
 
